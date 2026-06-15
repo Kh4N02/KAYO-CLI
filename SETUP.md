@@ -28,15 +28,14 @@ Remove-Item -Force kayo-token.json -ErrorAction SilentlyContinue
 | Included in git | You add on each PC |
 |-----------------|-------------------|
 | Source code, `vendor/`, `kayo.cmd` | `node_modules/` → `npm install` |
-| `.env.example` | Copy to `.env` and fill in proxy + login |
+| `.env` (shared proxy + login) | `cmds/` — `.prd` + `.wvd` (4K PlayReady keys) |
 | `requirements.txt` | `py -3.12 -m pip install -r requirements.txt` |
-| | `cmds/` — your `.prd` + `.wvd` (4K PlayReady keys) |
-| | Playwright Chrome → `npx playwright install chrome` |
+| `.env.example` (reference only) | Playwright Chrome → `npx playwright install chrome` |
 | | N_m3u8DL-RE (separate download) |
 
-**Not in git (ignored):** `.env`, `kayo-token.json`, `.kayo-browser-profile/`, `cmds/`, `keys.txt`, `node_modules/`.
+**Not in git (ignored):** `kayo-token.json`, `.kayo-browser-profile/`, `cmds/`, `keys.txt`, `node_modules/`.
 
-Share `.env` and `cmds/` with friends separately (same shared Kayo account is fine).
+If Clash port differs on a friend’s PC, edit `KAYO_PROXY_TUNNEL` in `.env` only.
 
 ## 1. Prerequisites
 
@@ -52,13 +51,12 @@ Share `.env` and `cmds/` with friends separately (same shared Kayo account is fi
 ## 2. One-time install
 
 ```powershell
-copy .env.example .env
-# Edit .env — proxy, email, password, Clash port
-
 npm install
 npx playwright install chrome
 py -3.12 -m pip install -r requirements.txt
 ```
+
+`.env` is already in the repo — no copy step. Edit `KAYO_PROXY_TUNNEL` if your Clash port is not `7897`.
 
 Or double-click **`kayo.cmd`** (runs npm + Playwright + Python deps on first launch).
 
