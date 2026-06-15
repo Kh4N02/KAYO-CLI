@@ -1,0 +1,15 @@
+{
+  "name": "kayo-cmd",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Kayo by Kh4N_PCT — browse channels, fetch MPD and keys",
+  "main": "kayo_cmd.js",
+  "scripts": {
+    "start": "node kayo_cmd.js",
+    "setup": "npm install && npx playwright install chrome && py -3.12 -m pip install -r requirements.txt"
+  },
+  "dependencies": {
+    "https-proxy-agent": "^7.0.6",
+    "playwright": "^1.52.0"
+  }
+}

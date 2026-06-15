@@ -1,0 +1,10 @@
+node_modules/
+.kayo-browser-profile/
+cmds/
+.env
+kayo-token.json
+keys.txt
+data/live-tv-rail.json
+_archive/
+_probe_out/
+*.mp4
