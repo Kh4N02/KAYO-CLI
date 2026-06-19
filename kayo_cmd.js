@@ -72,7 +72,7 @@ async function pickCategory() {
   console.log('');
   console.log(renderTable('Select Category', ['Idx', 'Category'], [
     ...categoryMenuRows(),
-    { Idx: 'r', Category: 'Refresh Kayo caches (UHD + replays)', sport: '' },
+    { Idx: 'r', Category: 'Refresh all caches (UHD + EPG + replays)', sport: '' },
     { Idx: 'q', Category: 'Quit', sport: '' },
   ]));
   console.log('');
@@ -287,7 +287,11 @@ async function browseReplaySport(category, token) {
     logInfo(`Fetching ${picked.label}...`);
     const cacheInfo = getDiscoveryCacheInfo();
     if (picked.label === '4K UHD Cricket') {
-      logCacheHint('4K UHD Cricket', cacheInfo.uhd);
+      if (cacheInfo.cricketPool?.fresh) {
+        logInfo(`Cricket pool: using cache (${cacheInfo.cricketPool.uhdCount} UHD / ${cacheInfo.cricketPool.count} replays, updated ${formatCacheAge(cacheInfo.cricketPool.updated)})`);
+      } else if (!cacheInfo.cricketPool?.fresh) {
+        logInfo('Building cricket pool (730 days EPG) — use r at main menu to pre-cache');
+      }
     } else if (picked.label === 'All Cricket Replays') {
       logCacheHint('Cricket replays', cacheInfo.cricketPool);
     }
@@ -340,6 +344,9 @@ async function browseCategory(category, token) {
     if (!cacheInfo.uhd?.fresh) {
       logInfo('Scanning home + sport rails for UHD (is4k)... first run may take several minutes.');
     }
+  }
+  if (category.key === 'epg') {
+    logCacheHint('Live & Upcoming', cacheInfo.epgLive);
   }
   let items;
   try {
@@ -408,7 +415,7 @@ async function main() {
       try {
         await refreshDiscoveryCaches(token, (msg) => logInfo(msg));
         const info = getDiscoveryCacheInfo();
-        logOk(`Caches refreshed — UHD: ${info.uhd?.count || 0} items`);
+        logOk(`Caches refreshed — UHD: ${info.uhd?.count || 0}, Cricket UHD: ${info.cricketPool?.uhdCount || 0}, EPG: ${info.epgLive?.count || 0}`);
       } catch (e) {
         logErr(e.message || String(e));
       }

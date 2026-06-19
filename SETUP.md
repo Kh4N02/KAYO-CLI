@@ -33,19 +33,26 @@ Remove-Item -Force kayo-token.json -ErrorAction SilentlyContinue
 | `.env.example` (reference only) | Playwright Chrome → `npx playwright install chrome` |
 | | N_m3u8DL-RE (separate download) |
 
-**Not in git (ignored):** `kayo-token.json`, `.kayo-browser-profile/`, `cmds/`, `keys.txt`, `node_modules/`, `data/live-tv-rail.json`, `data/uhd-events-cache.json`, `data/replay-pool-*.json` (runtime caches).
+**Not in git (ignored):** `kayo-token.json`, `.kayo-browser-profile/`, `cmds/`, `keys.txt`, `node_modules/`, `data/live-tv-rail.json`, `data/uhd-events-cache.json`, `data/replay-pool-*.json`, `data/epg-live-upcoming.json` (runtime caches).
 
 ### Caches (speed)
 
-First time you open **4K UHD Events** or **Cricket → 4K UHD Cricket**, Kayo is scanned (~5–15 min). Results are saved under `data/` and reused for **24 hours** (instant on later runs).
+Heavy Kayo lists are saved under `data/` and reused for **24 hours** (instant on later runs).
+
+| Cache | Used by |
+|-------|---------|
+| `uhd-events-cache.json` | **4K UHD Events**, UHD badges everywhere |
+| `replay-pool-cricket.json` | **All Cricket Replays**, **4K UHD Cricket**, cricket sections |
+| `epg-live-upcoming.json` | **Live & Upcoming (EPG)** |
+| `live-tv-rail.json` | **Live TV Channels** (fallback if API fails) |
 
 | Action | How |
 |--------|-----|
-| Refresh everything | At the main menu, choose **`r`** — Refresh Kayo caches |
+| Refresh everything | Main menu → **`r`** — rebuilds UHD + cricket pool + EPG + Live TV (~10–20 min once) |
 | Refresh on launch | `$env:KAYO_REFRESH_CACHE="1"; node kayo_cmd.js` |
 | Change cache lifetime | `KAYO_CACHE_HOURS=48` in `.env` (default 24) |
 
-**4K UHD Cricket** uses the UHD cache only (not the full 730-day EPG scan), so it is much faster after the first UHD scan.
+**4K UHD Cricket** uses the **cricket replay pool** (not the global UHD scan alone). After **`r`**, you should see the full UHD cricket count immediately — no need to quit and restart.
 
 If Clash port differs on a friend’s PC, edit `KAYO_PROXY_TUNNEL` in `.env` only.
 
