@@ -8,6 +8,7 @@ const {
   loadCategories,
   getCategories,
   loadReplaySubcategories,
+  fetchSearch,
   formatLocalTime,
   warmUhdAssetCache,
 } = require('./lib/kayo-api');
@@ -285,7 +286,33 @@ async function browseReplaySport(category, token) {
   }
 }
 
+async function browseSearch(token) {
+  for (;;) {
+    console.log('');
+    const query = await ask('Search Kayo (Enter = back to categories): ');
+    if (!query) return;
+
+    logInfo(`Searching "${query}"...`);
+    let items;
+    try {
+      items = await fetchSearch(query, token);
+    } catch (e) {
+      logErr(e.message || String(e));
+      continue;
+    }
+    if (!items.length) {
+      logWarn('No results. Try e.g. "Australia Pakistan" or "Pakistan v Australia".');
+      continue;
+    }
+    logOk(`Found ${items.length} result(s)`);
+    await browseSubcategoryItems(items, token, `Search: ${query}`, 'Search');
+  }
+}
+
 async function browseCategory(category, token) {
+  if (category.isSearch) {
+    return browseSearch(token);
+  }
   if (category.hasSubcategories && category.sportTitle) {
     return browseReplaySport(category, token);
   }

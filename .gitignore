@@ -6,4 +6,7 @@ keys.txt
 data/live-tv-rail.json
 _archive/
 _probe_out/
+_playback-dump.json
+_probe*.js
+_setup_dl_test/
 *.mp4

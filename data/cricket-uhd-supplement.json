@@ -1,0 +1,32 @@
+[
+  {
+    "assetId": "50dl9qv76o9cagzzavaeetear",
+    "title": "Australia v Pakistan",
+    "competition": "T20 Cricket",
+    "start": "2024-11-14T07:44:54Z",
+    "sport": "Cricket",
+    "type": "CatchUp",
+    "status": "Catchup",
+    "note": "2024 T20I #1 — UHD (verified asset)"
+  },
+  {
+    "assetId": "5ndlfdme6n30ujx5wj4kil7cx",
+    "title": "Australia v Pakistan",
+    "competition": "T20 Cricket",
+    "start": "2024-11-16T07:28:06Z",
+    "sport": "Cricket",
+    "type": "CatchUp",
+    "status": "Catchup",
+    "note": "2024 T20I #2 — UHD (verified asset)"
+  },
+  {
+    "assetId": "cqvmw8a8yrzrv0rynbtm34tqm",
+    "title": "Australia v Pakistan",
+    "competition": "T20 Cricket",
+    "start": "2024-11-18T07:27:50Z",
+    "sport": "Cricket",
+    "type": "CatchUp",
+    "status": "Catchup",
+    "note": "2024 T20I #3 — UHD (T20 Cricket; same series as #1/#2)"
+  }
+]

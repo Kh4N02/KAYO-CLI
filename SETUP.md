@@ -33,7 +33,7 @@ Remove-Item -Force kayo-token.json -ErrorAction SilentlyContinue
 | `.env.example` (reference only) | Playwright Chrome → `npx playwright install chrome` |
 | | N_m3u8DL-RE (separate download) |
 
-**Not in git (ignored):** `kayo-token.json`, `.kayo-browser-profile/`, `cmds/`, `keys.txt`, `node_modules/`.
+**Not in git (ignored):** `kayo-token.json`, `.kayo-browser-profile/`, `cmds/`, `keys.txt`, `node_modules/`, `data/live-tv-rail.json` (runtime cache).
 
 If Clash port differs on a friend’s PC, edit `KAYO_PROXY_TUNNEL` in `.env` only.
 
@@ -86,10 +86,14 @@ or double-click **`kayo.cmd`**.
 
 **4K UHD Events** — first open scans all Kayo rails (~2 minutes). Expect **~130** UHD items when the scan completes.
 
+**Search Kayo** — same search as the Kayo website (type a query, e.g. `Pakistan Australia`).
+
+**Cricket replays** — **All Cricket Replays** loads ~2 years of cricket from rails + EPG. Some older T20 UHD replays (e.g. Nov 2024 Aus v Pak) are tagged via `data/cricket-uhd-supplement.json` when Kayo’s rails do not show a 4K badge.
+
 ## 5. Using the menu
 
-1. Pick a category (Live TV, EPG, **4K UHD Events**, sport replays, etc.).
-2. Pick an event — **UHD** badge (magenta) = 4K; **HD** (cyan) = 1080p.
+1. Pick a category (Live TV, EPG, **4K UHD Events**, **Search Kayo**, sport replays, **All Cricket Replays**, **4K UHD Cricket**, etc.).
+2. Pick an event — **UHD** badge (magenta) = 4K; **HD** (cyan) = 1080p. Dates include the year.
 3. Wait for MPD + keys (headless Chrome + local Python CDM).
 4. Copy the **N_m3u8DL-RE** command.
 5. **VOD:** pick video/audio in N_m3u8DL (e.g. 2160p).
