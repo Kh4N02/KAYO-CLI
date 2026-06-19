@@ -29,11 +29,23 @@ Remove-Item -Force kayo-token.json -ErrorAction SilentlyContinue
 |-----------------|-------------------|
 | Source code, `vendor/`, `kayo.cmd` | `node_modules/` → `npm install` |
 | `.env` (shared proxy + login) | `cmds/` — `.prd` + `.wvd` (4K PlayReady keys) |
-| `requirements.txt` | `py -3.12 -m pip install -r requirements.txt` |
+| `requirements.txt` | Python 3.10+ — auto-detected (`python` or `py`); see below |
 | `.env.example` (reference only) | Playwright Chrome → `npx playwright install chrome` |
 | | N_m3u8DL-RE (separate download) |
 
-**Not in git (ignored):** `kayo-token.json`, `.kayo-browser-profile/`, `cmds/`, `keys.txt`, `node_modules/`, `data/live-tv-rail.json` (runtime cache).
+**Not in git (ignored):** `kayo-token.json`, `.kayo-browser-profile/`, `cmds/`, `keys.txt`, `node_modules/`, `data/live-tv-rail.json`, `data/uhd-events-cache.json`, `data/replay-pool-*.json` (runtime caches).
+
+### Caches (speed)
+
+First time you open **4K UHD Events** or **Cricket → 4K UHD Cricket**, Kayo is scanned (~5–15 min). Results are saved under `data/` and reused for **24 hours** (instant on later runs).
+
+| Action | How |
+|--------|-----|
+| Refresh everything | At the main menu, choose **`r`** — Refresh Kayo caches |
+| Refresh on launch | `$env:KAYO_REFRESH_CACHE="1"; node kayo_cmd.js` |
+| Change cache lifetime | `KAYO_CACHE_HOURS=48` in `.env` (default 24) |
+
+**4K UHD Cricket** uses the UHD cache only (not the full 730-day EPG scan), so it is much faster after the first UHD scan.
 
 If Clash port differs on a friend’s PC, edit `KAYO_PROXY_TUNNEL` in `.env` only.
 
@@ -43,7 +55,7 @@ If Clash port differs on a friend’s PC, edit `KAYO_PROXY_TUNNEL` in `.env` onl
 |------|--------|
 | **Git** | To clone the repo |
 | **Node.js 20+** | [nodejs.org](https://nodejs.org) |
-| **Python 3.12** | `py -3.12` on Windows |
+| **Python 3.10+** | Auto-detected — `python`, `py -3`, or `py` (any 3.10–3.13+) |
 | **Google Chrome** | Playwright uses it for Kayo WAF |
 | **N_m3u8DL-RE** | Paste printed commands into your install |
 | **AU VPN / Clash** | Webshare proxy in `.env`; tunnel on `KAYO_PROXY_TUNNEL` |
@@ -53,14 +65,44 @@ If Clash port differs on a friend’s PC, edit `KAYO_PROXY_TUNNEL` in `.env` onl
 ```powershell
 npm install
 npx playwright install chrome
-py -3.12 -m pip install -r requirements.txt
+node scripts/install-python-deps.js
 ```
+
+Or double-click **`kayo.cmd`** — it runs npm, Playwright, and Python deps on first launch.
 
 `.env` is already in the repo — no copy step. Edit `KAYO_PROXY_TUNNEL` if your Clash port is not `7897`.
 
-Or double-click **`kayo.cmd`** (runs npm + Playwright + Python deps on first launch).
-
 Put PlayReady/Widevine device files in **`cmds/`** (see friend who shared the folder).
+
+### Python on Windows (if `py` does not work)
+
+Many PCs only have the **`python`** command, not **`py`**. The app tries, in order: `py -3` → `py` → `python` → `python3`. You do **not** need Python 3.12 exactly — **3.10, 3.11, 3.12, 3.13** all work.
+
+1. Install from [python.org/downloads](https://www.python.org/downloads/) (64-bit).
+2. On the first installer screen, enable **“Add python.exe to PATH”** (important).
+3. Optional: the installer also adds the **`py`** launcher — nice to have, not required.
+4. Open a **new** PowerShell window and check:
+
+```powershell
+python --version
+# Python 3.12.x or 3.13.x etc.
+
+node scripts/install-python-deps.js
+```
+
+If auto-detect still fails, set in `.env`:
+
+```env
+KAYO_PYTHON=python
+```
+
+Or a full path:
+
+```env
+KAYO_PYTHON=C:\Users\You\AppData\Local\Programs\Python\Python313\python.exe
+```
+
+**`python` vs `py`:** Both run Python. `py` is a Windows launcher that picks a version; `python` is the direct executable. Either is fine once PATH is set.
 
 ## 3. Proxy / VPN
 
@@ -109,7 +151,8 @@ Expect **2160p**, **4 PlayReady keys**.
 | Problem | Fix |
 |---------|-----|
 | Won’t start / weird auth / WAF | Delete `.kayo-browser-profile` and `kayo-token.json`, re-run |
-| `No module named pyplayready` | `py -3.12 -m pip install -r requirements.txt` |
+| `No module named pyplayready` | Run `node scripts/install-python-deps.js` (or double-click `kayo.cmd`) |
+| `'py' is not recognized` / Python not found | Install Python 3.10+ from python.org, tick **Add to PATH**, open new terminal, or set `KAYO_PYTHON=python` in `.env` |
 | Device files missing | Add `.prd` and `.wvd` to `cmds/` |
 | Token expired | Delete `kayo-token.json`, re-run (uses `.env` login) |
 | MPD 401 / WAF | VPN on, Clash tunnel up, maybe headless=0 login |

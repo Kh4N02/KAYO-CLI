@@ -10,7 +10,10 @@ const {
   loadReplaySubcategories,
   fetchSearch,
   formatLocalTime,
-  warmUhdAssetCache,
+  hydrateUhdFromDisk,
+  refreshDiscoveryCaches,
+  getDiscoveryCacheInfo,
+  formatCacheAge,
 } = require('./lib/kayo-api');
 const { renderTable } = require('./lib/table');
 const { resolvePlaybackProxied } = require('./lib/playback');
@@ -60,15 +63,22 @@ function itemMenuRows(items) {
   }));
 }
 
+function logCacheHint(label, entry) {
+  if (!entry?.fresh) return;
+  logInfo(`${label}: using cache (${entry.count} items, updated ${formatCacheAge(entry.updated)})`);
+}
+
 async function pickCategory() {
   console.log('');
   console.log(renderTable('Select Category', ['Idx', 'Category'], [
     ...categoryMenuRows(),
+    { Idx: 'r', Category: 'Refresh Kayo caches (UHD + replays)', sport: '' },
     { Idx: 'q', Category: 'Quit', sport: '' },
   ]));
   console.log('');
   const choice = await ask('Select: ');
   if (choice.toLowerCase() === 'q') return null;
+  if (choice.toLowerCase() === 'r') return { isRefresh: true };
   const idx = Number(choice);
   const categories = getCategories();
   if (!Number.isInteger(idx) || idx < 1 || idx > categories.length) {
@@ -275,6 +285,12 @@ async function browseReplaySport(category, token) {
     if (picked === 'quit') process.exit(0);
 
     logInfo(`Fetching ${picked.label}...`);
+    const cacheInfo = getDiscoveryCacheInfo();
+    if (picked.label === '4K UHD Cricket') {
+      logCacheHint('4K UHD Cricket', cacheInfo.uhd);
+    } else if (picked.label === 'All Cricket Replays') {
+      logCacheHint('Cricket replays', cacheInfo.cricketPool);
+    }
     let items;
     try {
       items = await picked.fetch(token);
@@ -318,11 +334,15 @@ async function browseCategory(category, token) {
   }
 
   logInfo(`Fetching ${category.label}...`);
+  const cacheInfo = getDiscoveryCacheInfo();
+  if (category.key === 'uhd') {
+    logCacheHint('4K UHD Events', cacheInfo.uhd);
+    if (!cacheInfo.uhd?.fresh) {
+      logInfo('Scanning home + sport rails for UHD (is4k)... first run may take several minutes.');
+    }
+  }
   let items;
   try {
-    if (category.key === 'uhd') {
-      logInfo('Scanning home + sport rails for UHD (is4k)...');
-    }
     items = await category.fetch(token);
   } catch (e) {
     logErr(e.message || String(e));
@@ -360,7 +380,12 @@ async function main() {
   try {
     token = await authenticate((msg) => logInfo(msg));
     logOk('Successfully Authenticated!');
-    warmUhdAssetCache(token).catch(() => {});
+    const uhdDisk = hydrateUhdFromDisk();
+    if (uhdDisk) {
+      logInfo(`UHD cache loaded (${uhdDisk.items.length} items, updated ${formatCacheAge(uhdDisk.updated)})`);
+    } else {
+      logInfo('No fresh UHD cache — first 4K browse will scan Kayo rails (or press r to refresh now)');
+    }
   } catch (e) {
     logErr(e.message || String(e));
     process.exit(1);
@@ -378,6 +403,16 @@ async function main() {
     if (!category) {
       console.log(colorEnabled() ? `\n${kayo('Bye.')}\n` : '\nBye.\n');
       break;
+    }
+    if (category.isRefresh) {
+      try {
+        await refreshDiscoveryCaches(token, (msg) => logInfo(msg));
+        const info = getDiscoveryCacheInfo();
+        logOk(`Caches refreshed — UHD: ${info.uhd?.count || 0} items`);
+      } catch (e) {
+        logErr(e.message || String(e));
+      }
+      continue;
     }
     await browseCategory(category, token);
   }

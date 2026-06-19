@@ -6,7 +6,7 @@
   "main": "kayo_cmd.js",
   "scripts": {
     "start": "node kayo_cmd.js",
-    "setup": "npm install && npx playwright install chrome && py -3.12 -m pip install -r requirements.txt"
+    "setup": "npm install && npx playwright install chrome && node scripts/install-python-deps.js"
   },
   "dependencies": {
     "https-proxy-agent": "^7.0.6",
