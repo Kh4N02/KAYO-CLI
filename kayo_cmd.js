@@ -11,9 +11,8 @@ const {
   fetchSearch,
   formatLocalTime,
   hydrateUhdFromDisk,
-  refreshDiscoveryCaches,
-  getDiscoveryCacheInfo,
   formatCacheAge,
+  warmUhdAssetCache,
 } = require('./lib/kayo-api');
 const { renderTable } = require('./lib/table');
 const { resolvePlaybackProxied } = require('./lib/playback');
@@ -63,22 +62,15 @@ function itemMenuRows(items) {
   }));
 }
 
-function logCacheHint(label, entry) {
-  if (!entry?.fresh) return;
-  logInfo(`${label}: using cache (${entry.count} items, updated ${formatCacheAge(entry.updated)})`);
-}
-
 async function pickCategory() {
   console.log('');
   console.log(renderTable('Select Category', ['Idx', 'Category'], [
     ...categoryMenuRows(),
-    { Idx: 'r', Category: 'Refresh all caches (UHD + EPG + replays)', sport: '' },
     { Idx: 'q', Category: 'Quit', sport: '' },
   ]));
   console.log('');
   const choice = await ask('Select: ');
   if (choice.toLowerCase() === 'q') return null;
-  if (choice.toLowerCase() === 'r') return { isRefresh: true };
   const idx = Number(choice);
   const categories = getCategories();
   if (!Number.isInteger(idx) || idx < 1 || idx > categories.length) {
@@ -285,16 +277,6 @@ async function browseReplaySport(category, token) {
     if (picked === 'quit') process.exit(0);
 
     logInfo(`Fetching ${picked.label}...`);
-    const cacheInfo = getDiscoveryCacheInfo();
-    if (picked.label === '4K UHD Cricket') {
-      if (cacheInfo.cricketPool?.fresh) {
-        logInfo(`Cricket pool: using cache (${cacheInfo.cricketPool.uhdCount} UHD / ${cacheInfo.cricketPool.count} replays, updated ${formatCacheAge(cacheInfo.cricketPool.updated)})`);
-      } else if (!cacheInfo.cricketPool?.fresh) {
-        logInfo('Building cricket pool (730 days EPG) — use r at main menu to pre-cache');
-      }
-    } else if (picked.label === 'All Cricket Replays') {
-      logCacheHint('Cricket replays', cacheInfo.cricketPool);
-    }
     let items;
     try {
       items = await picked.fetch(token);
@@ -338,15 +320,8 @@ async function browseCategory(category, token) {
   }
 
   logInfo(`Fetching ${category.label}...`);
-  const cacheInfo = getDiscoveryCacheInfo();
   if (category.key === 'uhd') {
-    logCacheHint('4K UHD Events', cacheInfo.uhd);
-    if (!cacheInfo.uhd?.fresh) {
-      logInfo('Scanning home + sport rails for UHD (is4k)... first run may take several minutes.');
-    }
-  }
-  if (category.key === 'epg') {
-    logCacheHint('Live & Upcoming', cacheInfo.epgLive);
+    logInfo('Loading UHD list (cached when available)...');
   }
   let items;
   try {
@@ -391,7 +366,8 @@ async function main() {
     if (uhdDisk) {
       logInfo(`UHD cache loaded (${uhdDisk.items.length} items, updated ${formatCacheAge(uhdDisk.updated)})`);
     } else {
-      logInfo('No fresh UHD cache — first 4K browse will scan Kayo rails (or press r to refresh now)');
+      logInfo('Building UHD cache in background (first run)...');
+      warmUhdAssetCache(token).catch(() => {});
     }
   } catch (e) {
     logErr(e.message || String(e));
@@ -410,16 +386,6 @@ async function main() {
     if (!category) {
       console.log(colorEnabled() ? `\n${kayo('Bye.')}\n` : '\nBye.\n');
       break;
-    }
-    if (category.isRefresh) {
-      try {
-        await refreshDiscoveryCaches(token, (msg) => logInfo(msg));
-        const info = getDiscoveryCacheInfo();
-        logOk(`Caches refreshed — UHD: ${info.uhd?.count || 0}, Cricket UHD: ${info.cricketPool?.uhdCount || 0}, EPG: ${info.epgLive?.count || 0}`);
-      } catch (e) {
-        logErr(e.message || String(e));
-      }
-      continue;
     }
     await browseCategory(category, token);
   }

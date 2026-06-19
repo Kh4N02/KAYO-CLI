@@ -1,12 +1,12 @@
 node_modules/
 .kayo-browser-profile/
+.kayo-browser-profile-debug/
 cmds/
 kayo-token.json
 keys.txt
 data/live-tv-rail.json
 data/uhd-events-cache.json
 data/replay-pool-*.json
-data/epg-live-upcoming.json
 _archive/
 _probe_out/
 _playback-dump.json

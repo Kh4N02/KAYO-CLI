@@ -33,26 +33,18 @@ Remove-Item -Force kayo-token.json -ErrorAction SilentlyContinue
 | `.env.example` (reference only) | Playwright Chrome → `npx playwright install chrome` |
 | | N_m3u8DL-RE (separate download) |
 
-**Not in git (ignored):** `kayo-token.json`, `.kayo-browser-profile/`, `cmds/`, `keys.txt`, `node_modules/`, `data/live-tv-rail.json`, `data/uhd-events-cache.json`, `data/replay-pool-*.json`, `data/epg-live-upcoming.json` (runtime caches).
+**Not in git (ignored):** `kayo-token.json`, `.kayo-browser-profile/`, `cmds/`, `keys.txt`, `node_modules/`, `data/live-tv-rail.json`, `data/uhd-events-cache.json`, `data/replay-pool-*.json` (runtime caches).
 
 ### Caches (speed)
 
-Heavy Kayo lists are saved under `data/` and reused for **24 hours** (instant on later runs).
+EPG and UHD results are saved under `data/` and reused for **24 hours** — later runs load instantly. Use **Search Kayo** to find a specific match without waiting for full lists.
 
-| Cache | Used by |
-|-------|---------|
-| `uhd-events-cache.json` | **4K UHD Events**, UHD badges everywhere |
-| `replay-pool-cricket.json` | **All Cricket Replays**, **4K UHD Cricket**, cricket sections |
-| `epg-live-upcoming.json` | **Live & Upcoming (EPG)** |
-| `live-tv-rail.json` | **Live TV Channels** (fallback if API fails) |
+| Setting | Purpose |
+|--------|---------|
+| `KAYO_CACHE_HOURS=48` in `.env` | Keep caches longer (default 24) |
+| `KAYO_REFRESH_CACHE=1` on launch | Force a full re-fetch once |
 
-| Action | How |
-|--------|-----|
-| Refresh everything | Main menu → **`r`** — rebuilds UHD + cricket pool + EPG + Live TV (~10–20 min once) |
-| Refresh on launch | `$env:KAYO_REFRESH_CACHE="1"; node kayo_cmd.js` |
-| Change cache lifetime | `KAYO_CACHE_HOURS=48` in `.env` (default 24) |
-
-**4K UHD Cricket** uses the **cricket replay pool** (not the global UHD scan alone). After **`r`**, you should see the full UHD cricket count immediately — no need to quit and restart.
+**4K UHD Cricket** uses the shared cricket replay pool (cached) — same ~48 UHD items as filtering the full list, loads in seconds when cached.
 
 If Clash port differs on a friend’s PC, edit `KAYO_PROXY_TUNNEL` in `.env` only.
 
