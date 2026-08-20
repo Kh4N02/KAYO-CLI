@@ -1,7 +1,6 @@
 node_modules/
 .kayo-browser-profile/
 .kayo-browser-profile-debug/
-cmds/
 kayo-token.json
 keys.txt
 data/live-tv-rail.json

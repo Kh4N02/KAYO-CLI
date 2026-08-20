@@ -9,6 +9,8 @@ git clone https://github.com/Kh4N02/KAYO-CLI.git
 cd KAYO-CLI
 ```
 
+**Sharing with a friend?** See **`FRIEND-SETUP.md`** — you can temporarily commit `.env` + `cmds/` so they only install Node/Python/Chrome, then remove those files from GitHub.
+
 ## First run on a new PC (do this before anything else)
 
 If you copied files from another machine, or the app fails to start / auth / WAF:
