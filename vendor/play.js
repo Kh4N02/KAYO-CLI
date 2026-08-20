@@ -186,6 +186,14 @@ function isPlayReadyLicenseUrl(url) {
   return /playready/i.test(String(url || ''));
 }
 
+/** Widevine playback responses often carry PlayReady PSSH — license server path swap. */
+function toPlayReadyLicenseUrl(widevineOrPlayReadyUrl) {
+  const url = String(widevineOrPlayReadyUrl || '');
+  if (!url) return url;
+  if (isPlayReadyLicenseUrl(url)) return url;
+  return url.replace('/widevine/', '/playready/');
+}
+
 function extractPsshFromMpd(mpdXml) {
   const all = extractAllWidevinePsshFromMpd(mpdXml);
   if (all.length) return all[0];
@@ -563,6 +571,7 @@ module.exports = {
   extractAllWidevinePsshFromMpd,
   mergeKeysByKid,
   isPlayReadyLicenseUrl,
+  toPlayReadyLicenseUrl,
   extractPlayReadyFromMpd,
   pickPlayReadyLicenseUrl,
   playReadyLicenseHeaders,

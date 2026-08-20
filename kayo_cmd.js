@@ -134,6 +134,8 @@ function printStream(s, index) {
   if (s.keys?.length) {
     if (s.isLiveCdn && s.maxHeight && s.maxHeight < 2160) {
       logInfo(`Manifest max video is ${s.maxQuality}. Start/end clips the live window only — it does not add 4K.`);
+    } else if (s.maxHeight && s.maxHeight < 2160 && /playready/i.test(String(s.drm || ''))) {
+      logInfo(`UHD item — manifest tops out at ${s.maxQuality} (PlayReady keys via Widevine playback). True 2160p needs PlayReady playback API when available.`);
     } else if (s.uhdAvailable) {
       logInfo('2160p or multi-key UHD ladder detected — use this stream for 4K.');
     }
@@ -166,10 +168,14 @@ async function fetchStream(assetId, title, token, { item = null } = {}) {
   let headerWritten = false;
   let anyKeys = false;
 
+  const isUhd = item?.quality === 'UHD'
+    || /uhd|4k|2160/i.test(String(item?.title || title || ''));
+
   const result = await resolvePlaybackProxied({
     assetId,
     authToken: token,
     liveRange,
+    isUhd,
     onStatus: (msg) => logInfo(msg),
     onStream: ({ index, stream, title: streamTitle, failed }) => {
       if (!headerWritten) {
