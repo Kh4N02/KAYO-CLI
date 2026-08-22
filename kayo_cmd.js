@@ -18,6 +18,7 @@ const { renderTable } = require('./lib/table');
 const { resolvePlaybackProxied } = require('./lib/playback');
 const { appendStreamHeader, appendSingleStream } = require('./lib/key-store');
 const { promptLiveRange: promptLiveRangeInput } = require('./lib/live-range-prompt');
+const { launchNm3u8DlCommand } = require('./lib/launch-download');
 const {
   printBanner,
   logInfo,
@@ -109,7 +110,7 @@ async function promptLiveRange(item) {
   return promptLiveRangeInput(item, (text) => ask(text));
 }
 
-function printStream(s, index) {
+function printStream(s, index, { liveChannel = false, uhdItem = false } = {}) {
   const { isLikely4kStream } = require('./lib/mpd-formatter');
   const maxQ = s.maxQuality || 'unknown';
   const uhdHint = s.uhdAvailable || isLikely4kStream(s.cdnName, s.keys, s.maxHeight)
@@ -123,6 +124,18 @@ function printStream(s, index) {
     console.log('');
     return;
   }
+  if (liveChannel || (uhdItem && s.isUhd)) {
+    if (s.keys?.length) {
+      logOk('Decryption keys OK');
+      if (s.tokenRefreshed) {
+        logOk('CDN token refreshed');
+      }
+    } else {
+      logWarn('No keys for this CDN');
+    }
+    console.log('');
+    return;
+  }
   console.log(colorEnabled() ? `${C.bold}${s.isLiveCdn ? 'Formatted MPD URL' : 'MPD URL'}${C.reset}` : (s.isLiveCdn ? 'Formatted MPD URL' : 'MPD URL'));
   console.log(colorEnabled() ? `${C.dim}${s.manifestUrl}${C.reset}` : s.manifestUrl);
   if (s.liveRangePreview) {
@@ -132,9 +145,28 @@ function printStream(s, index) {
   console.log(colorEnabled() ? `${C.dim}${s.licenseUrl || ''}${C.reset}` : (s.licenseUrl || ''));
   console.log('');
   if (s.keys?.length) {
-    if (s.isLiveCdn && s.maxHeight && s.maxHeight < 2160) {
-      logInfo(`Manifest max video is ${s.maxQuality}. Start/end clips the live window only — it does not add 4K.`);
-    } else if (s.maxHeight && s.maxHeight < 2160 && /playready/i.test(String(s.drm || ''))) {
+    if (s.isLiveCdn) {
+      if (s.liveClip) {
+        logInfo('Catchup clip — local manifest.mpd with injected CDN tokens.');
+      } else {
+        logInfo('Live record — fresh CDN token, system VPN route, Origin tv.kayosports.com.au.');
+      }
+      if (s.tokenRefreshed) {
+        logOk('CDN token refreshed — run N_m3u8DL command immediately.');
+      }
+    } else if (s.isUhd) {
+      if (s.maxHeight && s.maxHeight < 2160) {
+        logInfo(`UHD item — manifest tops out at ${s.maxQuality} (PlayReady keys via Widevine playback). True 2160p needs PlayReady playback API when available.`);
+      } else if (s.uhdAvailable) {
+        logInfo('2160p or multi-key UHD ladder detected.');
+      }
+      if (s.tokenRefreshed) {
+        logOk('CDN token refreshed — run N_m3u8DL command immediately.');
+      }
+      if (/ac-vod/i.test(s.cdnName)) {
+        logInfo('Using dck1-ac-vod (fs-vod segment auth failed probe).');
+      }
+    } else if (s.maxHeight && s.maxHeight < 2160) {
       logInfo(`UHD item — manifest tops out at ${s.maxQuality} (PlayReady keys via Widevine playback). True 2160p needs PlayReady playback API when available.`);
     } else if (s.uhdAvailable) {
       logInfo('2160p or multi-key UHD ladder detected — use this stream for 4K.');
@@ -159,22 +191,39 @@ function printStream(s, index) {
 async function fetchStream(assetId, title, token, { item = null } = {}) {
   logInfo(`Fetching playback for ${colorEnabled() ? kayo(title || assetId) : (title || assetId)}...`);
 
+  const isLiveChannel = needsLiveRangePrompt(item);
   let liveRange = null;
-  if (needsLiveRangePrompt(item)) {
-    liveRange = await promptLiveRange(item);
+  if (isLiveChannel) {
+    const liveMode = await promptLiveRange(item);
+    liveRange = liveMode.liveRange;
   }
 
   let keyFile = null;
   let headerWritten = false;
   let anyKeys = false;
 
-  const isUhd = item?.quality === 'UHD'
-    || /uhd|4k|2160/i.test(String(item?.title || title || ''));
+  const isUhd = !isLiveChannel && (
+    item?.quality === 'UHD'
+    || /uhd|4k|2160/i.test(String(item?.title || title || ''))
+  );
+
+  if (isUhd) {
+    const { kayoTierInfo } = require('./lib/kayo-entitlements');
+    const tier = kayoTierInfo(token);
+    if (tier.tierId) {
+      logInfo(`Subscription tier: ${tier.tierId.replace(/_/g, ' ')} (${tier.productStatus || '?'})`);
+    }
+    if (!tier.has4kEntitlement) {
+      logWarn('Kayo Standard — 4K/PlayReady playback API is Premium-only. Expect 403 on true 2160p; best available is hybrid 1080p.');
+      logInfo('Upgrade to Kayo Premium ($45.99/mo) for 4K ladder access, then re-login (node kayo_cmd.js).');
+    }
+  }
 
   const result = await resolvePlaybackProxied({
     assetId,
     authToken: token,
     liveRange,
+    liveChannel: isLiveChannel,
     isUhd,
     onStatus: (msg) => logInfo(msg),
     onStream: ({ index, stream, title: streamTitle, failed }) => {
@@ -185,11 +234,13 @@ async function fetchStream(assetId, title, token, { item = null } = {}) {
         keyFile = appendStreamHeader({ title: streamTitle });
         headerWritten = true;
       }
-      printStream(stream, index);
+      printStream(stream, index, { liveChannel: isLiveChannel, uhdItem: isUhd });
       if (!failed && stream.keys?.length) {
         anyKeys = true;
         appendSingleStream({ stream, index });
-        logOk(`Saved stream ${index} keys to ${keyFile}`);
+        if (!isLiveChannel) {
+          logOk(`Saved stream ${index} keys to ${keyFile}`);
+        }
       }
     },
   });
@@ -202,15 +253,53 @@ async function fetchStream(assetId, title, token, { item = null } = {}) {
 
   if (!anyKeys) {
     logWarn('No decryption keys found for any CDN');
+  } else if ((isLiveChannel || isUhd) && !result.downloadStream?.cmd) {
+    logErr(`Could not build ${isLiveChannel ? 'live' : 'UHD'} download — check VPN (AU) and try again.`);
+    if (liveRange) {
+      logInfo('Catchup clip needs a valid time window on the live channel.');
+    }
+  } else if ((isLiveChannel || isUhd) && result.downloadStream?.cmd) {
+    const { cmd, cdnName, saveDir, maxHeight, maxQuality } = result.downloadStream;
+    console.log('');
+    if (isLiveChannel) {
+      logOk(`CDN: ${cdnName} · 1080p HEVC · stereo AAC · no subs`);
+      if (/ac-live/i.test(cdnName)) {
+        logInfo('Using dck1-ac-live (fs-live segment auth failed probe).');
+      }
+    } else {
+      const q = maxHeight >= 2160 ? '2160p' : (maxQuality || '1080p');
+      logOk(`CDN: ${cdnName} · ${q} · PlayReady keys · stereo AAC · no subs`);
+      if (/ac-vod/i.test(cdnName)) {
+        logInfo('Using dck1-ac-vod (fs-vod segment auth failed probe).');
+      }
+      if (maxHeight && maxHeight < 2160) {
+        logInfo(`Manifest max ${maxQuality} — best available until PlayReady playback API returns 2160p.`);
+      }
+    }
+    console.log(colorEnabled() ? `${C.gray}${cmd}${C.reset}` : cmd);
+    try {
+      const launched = launchNm3u8DlCommand(cmd, { saveDir });
+      logOk(`Launched ${launched.cmdExe} — output: ${saveDir || 'see --save-name in command'}`);
+      if (keyFile) logOk(`Keys saved to ${keyFile}`);
+      logInfo('Keep Clash/VPN on (AU). Download uses system route, not --custom-proxy.');
+    } catch (e) {
+      logErr(`Could not launch download: ${e.message}`);
+    }
   } else {
-    const { downloadProxyLabel } = require('./lib/proxy-request');
-    const proxyLabel = downloadProxyLabel();
-    if (proxyLabel) {
-      const tunnel = String(process.env.KAYO_PROXY_TUNNEL || '').trim();
-      const mode = tunnel
-        ? 'Clash tunnel (KAYO_PROXY_TUNNEL) — same AU egress as Webshare'
-        : 'Webshare (KAYO_PROXY)';
-      logInfo(`Download proxy: ${kayo(proxyLabel)} — ${mode}`);
+    const hadLive = result.streams?.some((s) => s.isLiveCdn && s.keys?.length);
+    if (hadLive) {
+      logInfo('Live download: keep Clash/VPN on (AU). N_m3u8DL uses system route — not --custom-proxy.');
+      logInfo('Set KAYO_LIVE_DOWNLOAD_PROXY=1 in .env to force Clash proxy on live downloads.');
+    } else {
+      const { downloadProxyLabel } = require('./lib/proxy-request');
+      const proxyLabel = downloadProxyLabel();
+      if (proxyLabel) {
+        const tunnel = String(process.env.KAYO_PROXY_TUNNEL || '').trim();
+        const mode = tunnel
+          ? 'Clash tunnel (KAYO_PROXY_TUNNEL) — same AU egress as Webshare'
+          : 'Webshare (KAYO_PROXY)';
+        logInfo(`Download proxy: ${kayo(proxyLabel)} — ${mode}`);
+      }
     }
   }
   console.log('');
