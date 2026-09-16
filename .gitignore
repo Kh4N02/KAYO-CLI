@@ -12,3 +12,14 @@ _playback-dump.json
 _probe*.js
 _setup_dl_test/
 *.mp4
+*.mkv
+*.m4a
+_bridge_run.bat
+_bridge_test_run.bat
+_kayo_download_*.bat
+scripts/_probe_*
+scripts/_test_*
+scripts/_debug_*
+scripts/_run_*.bat
+scripts/_catchup_test/
+scripts/_url.txt

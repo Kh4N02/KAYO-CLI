@@ -263,18 +263,74 @@ def probe_uhd_profiles(asset_id, token, session_id):
     return {'results': results, 'best': best, 'best_any': best_any, 'all_blocked': playready_blocked}
 
 
+WEB_WIDEVINE = {
+    'id': 'web-widevine',
+    'DrmType': 'WIDEVINE',
+    'Platform': 'web',
+    'PlayerId': '@dazn/peng-html5-core/web/web',
+    'Model': 'Chrome',
+    'Manufacturer': 'google',
+    'PlayReadyInitiator': 'false',
+    'Capabilities': 'hdr,hevc,mta',
+}
+
+WEBOS_WIDEVINE = {
+    'id': 'webos-widevine',
+    'DrmType': 'WIDEVINE',
+    'Platform': 'webos',
+    'PlayerId': '@dazn/peng-html5-core/tv-next/tv',
+    'Model': '43UR8050PSB',
+    'Manufacturer': 'lg',
+    'PlayReadyInitiator': 'false',
+    'Capabilities': '4k,dd,ddp,hdr,hevc,mta',
+}
+
+
+def web_widevine_ad_body():
+    return json.dumps({
+        'adParams': {
+            'useMT': False,
+            'isLat': '0',
+            'deviceOs': 'web',
+            'optout': '0',
+            'deviceBrand': '',
+            'idType': '',
+            'startPos': -1,
+            'deviceType': 'Web',
+            'playerName': '@dazn/peng-html5-core/web/web',
+            'playerVersion': APP_VERSION,
+            'vpmute': '0',
+            'wta': '0',
+            'requestPausedAdsUrl': False,
+        },
+    })
+
+
 def build_widevine_url(asset_id, token):
-    pl = token_payload(token)
-    viewer_id = pl.get('viewerId') or ''
-    session_id = f'{int(time.time() * 1000)}-{viewer_id}-{asset_id}-67BC9B'
-    params = (
-        'AppVersion=0.134.1-hotfix.f7e0d40f1&DrmType=WIDEVINE&Format=MPEG-DASH'
-        '&PlayerId=%40dazn%2Fpeng-html5-core%2Ftv-next%2Ftv&Platform=webos'
-        '&Model=43UR8050PSB&Secure=true&Manufacturer=lg&PlayReadyInitiator=false'
-        '&Capabilities=4k%2Cdd%2Cddp%2Chdr%2Chevc%2Cmta'
-        f'&AssetId={asset_id}&MtaLanguageCode&LanguageCode=en&SessionId={session_id}'
-    )
-    return f'{PLAYBACK_BASE}?{params}'
+    """Default HD profile — web Widevine (matches browser JWT)."""
+    return build_profile_url(asset_id, token, WEB_WIDEVINE)
+
+
+def fetch_playback_widevine(asset_id, token, session_id):
+    """Try web JWT profile first; fall back to legacy TV webos profile."""
+    attempts = [
+        ('web-get', 'GET', build_profile_url(asset_id, token, WEB_WIDEVINE), kayo_site_headers(token, session_id), None),
+        ('web-post', 'POST', build_profile_url(asset_id, token, WEB_WIDEVINE), kayo_site_headers(token, session_id), web_widevine_ad_body()),
+        ('webos-get', 'GET', build_profile_url(asset_id, token, WEBOS_WIDEVINE), playback_headers(token, session_id), None),
+    ]
+    last_status = 0
+    last_body = ''
+    for _name, method, url, headers, body in attempts:
+        if method == 'POST':
+            resp = requests.post(url, headers=headers, data=body, impersonate='chrome120', timeout=45, proxies=NO_PROXY)
+        else:
+            get_headers = {k: v for k, v in headers.items() if k.lower() != 'content-type'}
+            resp = requests.get(url, headers=get_headers, impersonate='chrome120', timeout=45, proxies=NO_PROXY)
+        if resp.status_code == 200:
+            return resp.json()
+        last_status = resp.status_code
+        last_body = resp.text[:300]
+    return {'error': f'Playback API HTTP {last_status}', 'body': last_body}
 
 
 def fetch_playready_jinx(asset_id, token, device_uuid):
@@ -290,12 +346,7 @@ def probe_live_cdn(manifest_url):
     import re
     from urllib.parse import unquote
 
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Referer': 'https://kayosports.com.au/',
-        'Origin': 'https://tv.kayosports.com.au',
-        'Accept': '*/*',
-    }
+    # MPD + init: no Referer/Origin/UA — Kayo CDN tokens 401 when browser headers are sent.
     resp = requests.get(manifest_url, impersonate='chrome120', timeout=25, proxies=NO_PROXY)
     if resp.status_code != 200:
         return {'ok': False, 'mpd_status': resp.status_code, 'init_status': 0}
@@ -313,7 +364,7 @@ def probe_live_cdn(manifest_url):
             seg += f"{sep}dazn-token={unquote(tok.group(1))}"
 
     init_url = base + seg
-    init_resp = requests.get(init_url, headers=headers, impersonate='chrome120', timeout=25, proxies=NO_PROXY)
+    init_resp = requests.get(init_url, impersonate='chrome120', timeout=25, proxies=NO_PROXY)
     return {
         'ok': init_resp.status_code == 200,
         'mpd_status': 200,
@@ -358,16 +409,11 @@ def main():
         asset_id = sys.argv[2]
         token = sys.argv[3]
         session_id = sys.argv[4] if len(sys.argv) > 4 and sys.argv[4] else None
-        url = build_widevine_url(asset_id, token)
-        headers = playback_headers(token, session_id)
-        resp = requests.get(url, headers=headers, impersonate='chrome120', timeout=45, proxies=NO_PROXY)
-        if resp.status_code != 200:
-            print(json.dumps({
-                'error': f'Playback API HTTP {resp.status_code}',
-                'body': resp.text[:300],
-            }))
+        result = fetch_playback_widevine(asset_id, token, session_id)
+        if result.get('error'):
+            print(json.dumps(result))
             sys.exit(2)
-        print(json.dumps(resp.json()))
+        print(json.dumps(result))
         return
 
     if cmd == 'playback-playready-jinx':

@@ -33,7 +33,8 @@ Remove-Item -Force kayo-token.json -ErrorAction SilentlyContinue
 | `.env` (shared proxy + login) | `cmds/` — `.prd` + `.wvd` (4K PlayReady keys) |
 | `requirements.txt` | Python 3.10+ — auto-detected (`python` or `py`); see below |
 | `.env.example` (reference only) | Playwright Chrome → `npx playwright install chrome` |
-| | N_m3u8DL-RE (separate download) |
+| | N_m3u8DL-RE on PATH (or `KAYO_NM3U8DL` in `.env`) |
+| | mp4decrypt + mkvmerge on PATH (decrypt/mux) |
 
 **Not in git (ignored):** `kayo-token.json`, `.kayo-browser-profile/`, `cmds/`, `keys.txt`, `node_modules/`, `data/live-tv-rail.json`, `data/uhd-events-cache.json`, `data/replay-pool-*.json` (runtime caches).
 
@@ -138,9 +139,9 @@ or double-click **`kayo.cmd`**.
 1. Pick a category (Live TV, EPG, **4K UHD Events**, **Search Kayo**, sport replays, **All Cricket Replays**, **4K UHD Cricket**, etc.).
 2. Pick an event — **UHD** badge (magenta) = 4K; **HD** (cyan) = 1080p. Dates include the year.
 3. Wait for MPD + keys (headless Chrome + local Python CDM).
-4. Copy the **N_m3u8DL-RE** command.
-5. **VOD:** pick video/audio in N_m3u8DL (e.g. 2160p).
-6. **Live:** command pins 1080p; use printed start/end on the URL if needed.
+4. Download auto-launches in a new **cmd** window (**N_m3u8DL-RE** + local CDN bridge).
+5. **Replays:** muxes to `.mp4` (best video + stereo audio, no subs).
+6. **Live / catchup:** muxes to `.mkv` (1080p HEVC).
 
 ### 4K test
 
@@ -160,8 +161,16 @@ Expect **2160p**, **4 PlayReady keys**.
 | UHD mux fails | Use all `--key` lines (4 for 4K) |
 | 4K list looks short | Wait for full rail scan (~2 min) or restart `kayo.cmd` |
 
-## 7. N_m3u8DL path
+## 7. Optional paths (`.env`)
 
-Prefix your install path, e.g.:
+Only set these if auto-detect fails:
 
-`D:\Downloads\N_m3u8DL-RE_Beta_win-x64\N_m3u8DL-RE.exe` + rest of printed command.
+| Variable | When to set |
+|----------|-------------|
+| `KAYO_NM3U8DL` | N_m3u8DL-RE not on PATH |
+| `KAYO_DOWNLOAD_DIR` | Save folder (default: repo folder) |
+| `KAYO_PYTHON` | Python not auto-detected |
+| `KAYO_PROXY_TUNNEL` | Clash port not `7897` |
+| `KAYO_DOWNLOADER=python` | Use Python downloader instead of N_m3u8DL |
+
+No hardcoded machine paths in the code — everything else is relative to the repo.

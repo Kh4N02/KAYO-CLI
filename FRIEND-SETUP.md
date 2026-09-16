@@ -9,7 +9,8 @@ Use this when `.env` and `cmds/` are included in the clone. **Delete them from G
 | **Node.js 20+** | https://nodejs.org — LTS, default options |
 | **Python 3.10+** | https://www.python.org/downloads — tick **Add python.exe to PATH** |
 | **Google Chrome** | https://www.google.com/chrome/ |
-| **N_m3u8DL-RE** | Your usual download folder |
+| **N_m3u8DL-RE** | On PATH, **or** set `KAYO_NM3U8DL=D:\path\N_m3u8DL-RE.exe` in `.env` |
+| **mp4decrypt + mkvmerge** | On PATH (N_m3u8DL uses them for decrypt/mux) |
 | **Clash / VPN** | AU exit, HTTP port in `.env` (`KAYO_PROXY_TUNNEL`) |
 
 Quick install (Windows, if `winget` works):
@@ -31,6 +32,19 @@ cd KAYO-CLI
 Double-click **`kayo.cmd`** (or `node kayo_cmd.js`).
 
 First launch installs npm packages, Playwright Chrome, and Python libs (`pyplayready`, `pywidevine`, `curl_cffi`).
+
+**Downloads:** kayo_cmd auto-launches **N_m3u8DL-RE** in a new cmd window. A tiny local **CDN bridge** (Python) starts automatically — no extra setup. Keep Clash/VPN on (AU).
+
+**Optional `.env` paths** (only if defaults fail on your PC):
+
+```env
+KAYO_NM3U8DL=D:\Tools\N_m3u8DL-RE.exe
+KAYO_DOWNLOAD_DIR=D:\Downloads\Kayo
+KAYO_PYTHON=python
+KAYO_DOWNLOADER=python
+```
+
+`KAYO_DOWNLOADER=python` skips N_m3u8DL and uses the built-in Python downloader instead.
 
 ## 3. Before first use
 

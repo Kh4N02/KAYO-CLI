@@ -276,21 +276,26 @@ async function fetchStream(assetId, title, token, { item = null } = {}) {
         logInfo(`Manifest max ${maxQuality} — best available until PlayReady playback API returns 2160p.`);
       }
     }
-    console.log(colorEnabled() ? `${C.gray}${cmd}${C.reset}` : cmd);
     try {
-      const launched = launchNm3u8DlCommand(cmd, { saveDir });
-      logOk(`Launched ${launched.cmdExe} — output: ${saveDir || 'see --save-name in command'}`);
+      const launched = await launchNm3u8DlCommand(cmd, {
+        saveDir,
+        title: result.title,
+        cdnUpstreamBase: result.downloadStream.cdnUpstreamBase,
+      });
+      console.log(colorEnabled() ? `${C.gray}${launched.command}${C.reset}` : launched.command);
+      logOk(`Launched ${launched.cmdExe} — batch: ${launched.batchPath}`);
+      if (launched.bridgePort) {
+        logInfo(`CDN bridge on 127.0.0.1:${launched.bridgePort} → ${launched.bridgeOrigin} (no User-Agent to Kayo CDN).`);
+      }
       if (keyFile) logOk(`Keys saved to ${keyFile}`);
-      logInfo('Keep Clash/VPN on (AU). Download uses system route, not --custom-proxy.');
+      logInfo('Keep Clash/VPN on (AU). N_m3u8DL-RE fetches segments via local CDN bridge.');
     } catch (e) {
       logErr(`Could not launch download: ${e.message}`);
     }
-  } else {
-    const hadLive = result.streams?.some((s) => s.isLiveCdn && s.keys?.length);
-    if (hadLive) {
-      logInfo('Live download: keep Clash/VPN on (AU). N_m3u8DL uses system route — not --custom-proxy.');
-      logInfo('Set KAYO_LIVE_DOWNLOAD_PROXY=1 in .env to force Clash proxy on live downloads.');
-    } else {
+  } else if (anyKeys) {
+    const pick = result.streams?.find((s) => s.recommended && s.cmd && s.keys?.length)
+      || result.streams?.find((s) => s.cmd && s.keys?.length);
+    if (pick?.cmd) {
       const { downloadProxyLabel } = require('./lib/proxy-request');
       const proxyLabel = downloadProxyLabel();
       if (proxyLabel) {
@@ -299,6 +304,24 @@ async function fetchStream(assetId, title, token, { item = null } = {}) {
           ? 'Clash tunnel (KAYO_PROXY_TUNNEL) — same AU egress as Webshare'
           : 'Webshare (KAYO_PROXY)';
         logInfo(`Download proxy: ${kayo(proxyLabel)} — ${mode}`);
+      }
+      console.log('');
+      logOk(`Launching download — ${pick.cdnName} (recommended)`);
+      try {
+        const launched = await launchNm3u8DlCommand(pick.cmd, {
+          title: result.title,
+          cdnUpstreamBase: pick.cdnUpstreamBase,
+        });
+        console.log(colorEnabled() ? `${C.gray}${launched.command}${C.reset}` : launched.command);
+        logOk(`Launched ${launched.cmdExe} — batch: ${launched.batchPath}`);
+        if (launched.bridgePort) {
+          logInfo(`CDN bridge on 127.0.0.1:${launched.bridgePort} → ${launched.bridgeOrigin} (no User-Agent to Kayo CDN).`);
+        }
+        if (keyFile) logOk(`Keys saved to ${keyFile}`);
+        logInfo('Keep Clash/VPN on (AU). N_m3u8DL-RE fetches segments via local CDN bridge.');
+      } catch (e) {
+        logErr(`Could not launch download: ${e.message}`);
+        logInfo('Copy the N_m3u8DL-RE command above into a cmd window manually.');
       }
     }
   }
