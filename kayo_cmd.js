@@ -179,8 +179,12 @@ function printStream(s, index, { liveChannel = false, uhdItem = false } = {}) {
     }
     if (s.cmd) {
       console.log('');
-      console.log(colorEnabled() ? `${C.bold}${kayo('N_m3u8DL-RE command')}${C.reset}` : 'N_m3u8DL-RE command:');
-      console.log(colorEnabled() ? `${C.gray}${s.cmd}${C.reset}` : s.cmd);
+      if (String(s.cmd).includes('__KAYO_BRIDGE__')) {
+        logInfo('Download auto-launches below — do not copy/run this command manually (__KAYO_BRIDGE__ is replaced at launch).');
+      } else {
+        console.log(colorEnabled() ? `${C.bold}${kayo('N_m3u8DL-RE command')}${C.reset}` : 'N_m3u8DL-RE command:');
+        console.log(colorEnabled() ? `${C.gray}${s.cmd}${C.reset}` : s.cmd);
+      }
     }
   } else {
     logWarn('No keys for this CDN');
@@ -281,6 +285,7 @@ async function fetchStream(assetId, title, token, { item = null } = {}) {
         saveDir,
         title: result.title,
         cdnUpstreamBase: result.downloadStream.cdnUpstreamBase,
+        manifestUrl: result.downloadStream.manifestUrl,
       });
       console.log(colorEnabled() ? `${C.gray}${launched.command}${C.reset}` : launched.command);
       logOk(`Launched ${launched.cmdExe} — batch: ${launched.batchPath}`);
@@ -311,6 +316,7 @@ async function fetchStream(assetId, title, token, { item = null } = {}) {
         const launched = await launchNm3u8DlCommand(pick.cmd, {
           title: result.title,
           cdnUpstreamBase: pick.cdnUpstreamBase,
+          manifestUrl: pick.manifestUrl,
         });
         console.log(colorEnabled() ? `${C.gray}${launched.command}${C.reset}` : launched.command);
         logOk(`Launched ${launched.cmdExe} — batch: ${launched.batchPath}`);
@@ -321,7 +327,7 @@ async function fetchStream(assetId, title, token, { item = null } = {}) {
         logInfo('Keep Clash/VPN on (AU). N_m3u8DL-RE fetches segments via local CDN bridge.');
       } catch (e) {
         logErr(`Could not launch download: ${e.message}`);
-        logInfo('Copy the N_m3u8DL-RE command above into a cmd window manually.');
+        logInfo('Do not paste the printed command — it contains __KAYO_BRIDGE__ until auto-launch. Fix the error above and re-run kayo_cmd.');
       }
     }
   }

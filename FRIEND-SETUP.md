@@ -35,6 +35,8 @@ First launch installs npm packages, Playwright Chrome, and Python libs (`pyplayr
 
 **Downloads:** kayo_cmd auto-launches **N_m3u8DL-RE** in a new cmd window. A tiny local **CDN bridge** (Python) starts automatically — no extra setup. Keep Clash/VPN on (AU).
 
+**Do not copy/paste the N_m3u8DL command** from the keys screen — it shows `__KAYO_BRIDGE__`, which is replaced only when kayo_cmd launches the download. Wait for `Launched cmd.exe — batch: ...` and use that new window.
+
 **Optional `.env` paths** (only if defaults fail on your PC):
 
 ```env
