@@ -106,6 +106,14 @@ function needsLiveRangePrompt(item) {
   return /^(Live|Upcoming)$/i.test(String(item.status || ''));
 }
 
+/** Cricket/sport replays: Catchup on Kayo, not linear Live TV. */
+function isCatchupReplayItem(item) {
+  if (!item || item.isLinear) return false;
+  const type = String(item.type || item.assetType || '').toLowerCase();
+  if (type === 'catchup' || type === 'replay') return true;
+  return /^catchup$/i.test(String(item.status || ''));
+}
+
 async function promptLiveRange(item) {
   return promptLiveRangeInput(item, (text) => ask(text));
 }
@@ -148,6 +156,8 @@ function printStream(s, index, { liveChannel = false, uhdItem = false } = {}) {
     if (s.isLiveCdn) {
       if (s.liveClip) {
         logInfo('Catchup clip — local manifest.mpd with injected CDN tokens.');
+      } else if (s.catchupReplay) {
+        logInfo('Catchup replay — full match on live CDN manifest (downloads as VOD, not live record).');
       } else {
         logInfo('Live record — fresh CDN token, system VPN route, Origin tv.kayosports.com.au.');
       }
@@ -196,6 +206,7 @@ async function fetchStream(assetId, title, token, { item = null } = {}) {
   logInfo(`Fetching playback for ${colorEnabled() ? kayo(title || assetId) : (title || assetId)}...`);
 
   const isLiveChannel = needsLiveRangePrompt(item);
+  const catchupReplay = isCatchupReplayItem(item);
   let liveRange = null;
   if (isLiveChannel) {
     const liveMode = await promptLiveRange(item);
@@ -228,6 +239,7 @@ async function fetchStream(assetId, title, token, { item = null } = {}) {
     authToken: token,
     liveRange,
     liveChannel: isLiveChannel,
+    catchupReplay,
     isUhd,
     onStatus: (msg) => logInfo(msg),
     onStream: ({ index, stream, title: streamTitle, failed }) => {
