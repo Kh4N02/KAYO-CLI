@@ -31,7 +31,9 @@ cd KAYO-CLI
 
 Double-click **`kayo.cmd`** (or `node kayo_cmd.js`).
 
-First launch installs npm packages, Playwright Chrome, and Python libs (`pyplayready`, `pywidevine`, `curl_cffi`).
+First launch installs npm packages, Playwright Chrome, and Python libs (`pyplayready`, `pywidevine`, `curl_cffi`). Device files in `cmds/` (Xiaomi L1 `.wvd` + PlayReady `.prd`).
+
+**Downloads:** N_m3u8DL prompts you to pick **video and audio** (e.g. 1080p + 384 kbps AC-3) — do not use `--auto-select` when pasting commands manually.
 
 **Downloads:** kayo_cmd auto-launches **N_m3u8DL-RE** in a new cmd window. A tiny local **CDN bridge** (Python) starts automatically — no extra setup. Keep Clash/VPN on (AU).
 

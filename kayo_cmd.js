@@ -492,6 +492,11 @@ async function browseCategory(category, token) {
 
 async function main() {
   loadEnv();
+  const { ensureCmdDevices } = require('./lib/ensure-cmd-devices');
+  const copiedDevices = ensureCmdDevices();
+  if (copiedDevices.length) {
+    logInfo(`Device files copied to cmds/: ${copiedDevices.join(', ')}`);
+  }
   printBanner();
   logInfo('Authenticating with Kayo Servers...');
   let token;

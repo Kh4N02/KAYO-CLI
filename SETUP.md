@@ -74,7 +74,11 @@ Or double-click **`kayo.cmd`** — it runs npm, Playwright, and Python deps on f
 
 `.env` is already in the repo — no copy step. Edit `KAYO_PROXY_TUNNEL` if your Clash port is not `7897`.
 
-Put PlayReady/Widevine device files in **`cmds/`** (see friend who shared the folder).
+Put PlayReady/Widevine device files in **`cmds/`**, or drop them in the repo root — on launch, **`xiaomi_…_l1.wvd`** and **`hisense_….prd`** are copied into `cmds/` automatically if missing.
+
+Default Widevine device: **Xiaomi L1** (`xiaomi_m2103k19pi_16.1.1_006_30cd6121_21111_l1.wvd`).
+
+Catchup smoke test (100 segments): `node scripts/verify-catchup-download.js --segments 100`
 
 ### Python on Windows (if `py` does not work)
 

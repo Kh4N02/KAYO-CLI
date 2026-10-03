@@ -13,4 +13,5 @@ if errorlevel 1 (
   pause
   exit /b 1
 )
+node "%~dp0scripts\ensure-cmd-devices.js"
 node kayo_cmd.js %*

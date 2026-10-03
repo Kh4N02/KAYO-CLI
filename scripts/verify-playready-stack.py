@@ -57,7 +57,7 @@ print('license URL:', pr_lic[:80], '...')
 
 # Use cdm_local serve via stdin one-shot
 prd = ROOT / 'cmds' / 'hisense_smarttv_43a6101eu_sl3000.prd'
-wvd = ROOT / 'cmds' / 'motorola_moto_g_v5.0.0-android_d9eff17f_4445_l3.wvd'
+wvd = ROOT / 'cmds' / 'xiaomi_m2103k19pi_16.1.1_006_30cd6121_21111_l1.wvd'
 proc = subprocess.Popen(
     [sys.executable, str(ROOT / 'lib' / 'cdm_local.py'), 'serve', str(prd), str(wvd)],
     stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
