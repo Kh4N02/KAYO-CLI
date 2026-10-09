@@ -157,6 +157,8 @@ Expect **2160p**, **4 PlayReady keys**.
 | Problem | Fix |
 |---------|-----|
 | Won’t start / weird auth / WAF | Delete `.kayo-browser-profile` and `kayo-token.json`, re-run |
+| DAZN / VPN page in login Chrome | **Don’t stack** ExpressVPN + Clash — pick one. ExpressVPN: `KAYO_BROWSER_NO_PROXY=1`, Australia server, then `kayo.cmd`. Clash: system VPN **off**, Clash **AU** node, correct `KAYO_PROXY_TUNNEL` |
+| Login works in Chrome but not script | Same as above, or set `KAYO_TOKEN=` from DevTools (RefreshAccessToken) |
 | `No module named pyplayready` | Run `node scripts/install-python-deps.js` (or double-click `kayo.cmd`) |
 | `'py' is not recognized` / Python not found | Install Python 3.10+ from python.org, tick **Add to PATH**, open new terminal, or set `KAYO_PYTHON=python` in `.env` |
 | Device files missing | Add `.prd` and `.wvd` to `cmds/` |

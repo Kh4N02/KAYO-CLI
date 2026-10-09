@@ -230,7 +230,7 @@ async function fetchStream(assetId, title, token, { item = null } = {}) {
     }
     if (!tier.has4kEntitlement) {
       logWarn('Kayo Standard — 4K/PlayReady playback API is Premium-only. Expect 403 on true 2160p; best available is hybrid 1080p.');
-      logInfo('Upgrade to Kayo Premium ($45.99/mo) for 4K ladder access, then re-login (node kayo_cmd.js).');
+      logInfo('Upgrade to Kayo Premium ($45.99/mo) for 4K ladder access (JWT must show allow4k after upgrade).');
     }
   }
 

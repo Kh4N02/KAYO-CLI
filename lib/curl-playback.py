@@ -8,7 +8,7 @@ import sys
 import re
 import time
 import uuid
-from urllib.parse import urlencode
+from urllib.parse import quote, urlencode
 
 from curl_cffi import requests
 
@@ -18,20 +18,146 @@ CAPS_4K = '4k,dd,ddp,hdr,hevc,mta'
 # Playback API must use system VPN/TUN — explicit HTTP_PROXY (Clash) often gets CloudFront 403.
 NO_PROXY = {'http': None, 'https': None, 'all': None}
 
+
+def curl_proxies():
+    """Clash HTTP port from .env, else direct (system TUN)."""
+    load_dotenv()
+    tunnel = (os.environ.get('KAYO_PROXY_TUNNEL') or '').strip()
+    if tunnel:
+        url = tunnel if tunnel.startswith('http') else f'http://{tunnel}'
+        return {'http': url, 'https': url, 'all': url}
+    return NO_PROXY
+
+
+def webshare_proxies():
+    """KAYO_PROXY=host:port:user:pass (AU Webshare)."""
+    load_dotenv()
+    raw = (os.environ.get('KAYO_PROXY') or '').strip()
+    if not raw or raw.startswith('http'):
+        return None
+    parts = raw.split(':')
+    if len(parts) < 4:
+        return None
+    host, port, user = parts[0], parts[1], parts[2]
+    password = ':'.join(parts[3:])
+    if not all([host, port, user, password]):
+        return None
+    url = f'http://{quote(user, safe="")}:{quote(password, safe="")}@{host}:{port}'
+    return {'http': url, 'https': url, 'all': url}
+
+
+def playback_proxy_chain():
+    """System TUN → Clash tunnel → Webshare (KAYO_PROXY)."""
+    load_dotenv()
+    chain = [NO_PROXY]
+    tunnel = curl_proxies()
+    if tunnel is not NO_PROXY:
+        chain.append(tunnel)
+    ws = webshare_proxies()
+    if ws:
+        chain.append(ws)
+    return chain
+
+
+def playback_http_get(url, headers):
+    last = None
+    last_err = None
+    get_headers = {k: v for k, v in headers.items() if k.lower() != 'content-type'}
+    for proxies in playback_proxy_chain():
+        try:
+            resp = requests.get(url, headers=get_headers, impersonate='chrome120', timeout=45, proxies=proxies)
+            last = resp
+            if resp.status_code == 200 or resp.status_code != 403:
+                return resp
+        except Exception as exc:
+            last_err = exc
+            continue
+    if last is not None:
+        return last
+    if last_err:
+        raise last_err
+    raise RuntimeError('playback_http_get failed')
+
+
+def playback_http_post(url, headers, body):
+    last = None
+    last_err = None
+    for proxies in playback_proxy_chain():
+        try:
+            resp = requests.post(url, headers=headers, data=body, impersonate='chrome120', timeout=45, proxies=proxies)
+            last = resp
+            if resp.status_code == 200 or resp.status_code != 403:
+                return resp
+        except Exception as exc:
+            last_err = exc
+            continue
+    if last is not None:
+        return last
+    if last_err:
+        raise last_err
+    raise RuntimeError('playback_http_post failed')
+
 UHD_PROFILES = [
-    # Kayo help article — https://help.kayosports.com.au/4k
-    {'id': 'androidtv-4k', 'DrmType': 'PLAYREADY', 'Platform': 'androidtv', 'PlayerId': '@dazn/peng-html5-core/androidtv/androidtv', 'Model': 'SHIELD Android TV', 'Manufacturer': 'NVIDIA', 'PlayReadyInitiator': 'false', 'Capabilities': CAPS_4K},
-    {'id': 'appletv-4k', 'DrmType': 'PLAYREADY', 'Platform': 'appletv', 'PlayerId': '@dazn/peng-html5-core/appletv/appletv', 'Model': 'Apple TV 4K', 'Manufacturer': 'Apple', 'PlayReadyInitiator': 'false', 'Capabilities': CAPS_4K},
-    {'id': 'chromecast-4k', 'DrmType': 'PLAYREADY', 'Platform': 'chromecast', 'PlayerId': '@dazn/peng-html5-core/chromecast/chromecast', 'Model': 'Chromecast with Google TV 4K', 'Manufacturer': 'Google', 'PlayReadyInitiator': 'false', 'Capabilities': CAPS_4K},
-    {'id': 'hisense-vidaa-sl3000', 'DrmType': 'PLAYREADY', 'Platform': 'vidaa', 'PlayerId': '@dazn/peng-html5-core/vidaa/vidaa', 'Model': '43A6101EU', 'Manufacturer': 'Hisense', 'PlayReadyInitiator': 'true', 'Capabilities': '4k,hdr,hevc,mta'},
-    {'id': 'webos-lg-4k', 'DrmType': 'PLAYREADY', 'Platform': 'webos', 'PlayerId': '@dazn/peng-html5-core/tv-next/tv', 'Model': '43UR8050PSB', 'Manufacturer': 'lg', 'PlayReadyInitiator': 'false', 'Capabilities': CAPS_4K},
-    {'id': 'ps5-playready', 'DrmType': 'PLAYREADY', 'Platform': 'ps5', 'PlayerId': '@dazn/peng-html5-core/ps5/ps5', 'Model': 'PlayStation 5', 'Manufacturer': 'Sony', 'PlayReadyInitiator': 'false', 'Capabilities': CAPS_4K},
-    {'id': 'tizen-samsung-4k', 'DrmType': 'PLAYREADY', 'Platform': 'tizen', 'PlayerId': '@dazn/peng-html5-core/tizen/tizen', 'Model': 'QN55Q80AAU', 'Manufacturer': 'samsung', 'PlayReadyInitiator': 'false', 'Capabilities': CAPS_4K},
-    {'id': 'sony-androidtv-4k', 'DrmType': 'PLAYREADY', 'Platform': 'androidtv', 'PlayerId': '@dazn/peng-html5-core/androidtv/androidtv', 'Model': 'BRAVIA 4K GB', 'Manufacturer': 'Sony', 'PlayReadyInitiator': 'false', 'Capabilities': CAPS_4K},
-    {'id': 'firetv-4k', 'DrmType': 'PLAYREADY', 'Platform': 'firetv', 'PlayerId': '@dazn/peng-html5-core/firetv/firetv', 'Model': 'AFTKA', 'Manufacturer': 'Amazon', 'PlayReadyInitiator': 'false', 'Capabilities': CAPS_4K},
-    {'id': 'xbox-playready', 'DrmType': 'PLAYREADY', 'Platform': 'xboxone', 'PlayerId': '@dazn/peng-html5-core/xbox/xbox', 'Model': 'Xbox Series X', 'Manufacturer': 'Microsoft', 'PlayReadyInitiator': 'false', 'Capabilities': CAPS_4K},
+    # Probe / playback order — verified 4K ladders on dck1-ac-vod (F1 UHD catchup).
     {'id': 'web-playready-4k-cap', 'DrmType': 'PLAYREADY', 'Platform': 'web', 'PlayerId': '@dazn/peng-html5-core/web/web', 'Model': 'Chrome', 'Manufacturer': 'google', 'PlayReadyInitiator': 'false', 'Capabilities': CAPS_4K},
+    {'id': 'webos-lg-4k', 'DrmType': 'PLAYREADY', 'Platform': 'webos', 'PlayerId': '@dazn/peng-html5-core/tv-next/tv', 'Model': '43UR8050PSB', 'Manufacturer': 'lg', 'PlayReadyInitiator': 'false', 'Capabilities': CAPS_4K},
+    {'id': 'tizen-samsung-4k', 'DrmType': 'PLAYREADY', 'Platform': 'tizen', 'PlayerId': '@dazn/peng-html5-core/tizen/tizen', 'Model': 'QN55Q80AAU', 'Manufacturer': 'samsung', 'PlayReadyInitiator': 'false', 'Capabilities': CAPS_4K},
+    {'id': 'androidtv-4k', 'DrmType': 'PLAYREADY', 'Platform': 'androidtv', 'PlayerId': '@dazn/peng-html5-core/androidtv/androidtv', 'Model': 'SHIELD Android TV', 'Manufacturer': 'NVIDIA', 'PlayReadyInitiator': 'false', 'Capabilities': CAPS_4K},
+    {'id': 'firetv-4k', 'DrmType': 'PLAYREADY', 'Platform': 'firetv', 'PlayerId': '@dazn/peng-html5-core/firetv/firetv', 'Model': 'AFTKA', 'Manufacturer': 'Amazon', 'PlayReadyInitiator': 'false', 'Capabilities': CAPS_4K},
+    {'id': 'appletv-4k', 'DrmType': 'PLAYREADY', 'Platform': 'appletv', 'PlayerId': '@dazn/peng-html5-core/appletv/appletv', 'Model': 'Apple TV 4K', 'Manufacturer': 'Apple', 'PlayReadyInitiator': 'false', 'Capabilities': CAPS_4K},
+    {'id': 'xbox-playready', 'DrmType': 'PLAYREADY', 'Platform': 'xboxone', 'PlayerId': '@dazn/peng-html5-core/xbox/xbox', 'Model': 'Xbox Series X', 'Manufacturer': 'Microsoft', 'PlayReadyInitiator': 'false', 'Capabilities': CAPS_4K},
+    {'id': 'ps5-playready', 'DrmType': 'PLAYREADY', 'Platform': 'ps5', 'PlayerId': '@dazn/peng-html5-core/ps5/ps5', 'Model': 'PlayStation 5', 'Manufacturer': 'Sony', 'PlayReadyInitiator': 'false', 'Capabilities': CAPS_4K},
+    {'id': 'hisense-vidaa-sl3000', 'DrmType': 'PLAYREADY', 'Platform': 'vidaa', 'PlayerId': '@dazn/peng-html5-core/vidaa/vidaa', 'Model': '43A6101EU', 'Manufacturer': 'Hisense', 'PlayReadyInitiator': 'true', 'Capabilities': '4k,hdr,hevc,mta'},
+    {'id': 'chromecast-4k', 'DrmType': 'PLAYREADY', 'Platform': 'chromecast', 'PlayerId': '@dazn/peng-html5-core/chromecast/chromecast', 'Model': 'Chromecast with Google TV 4K', 'Manufacturer': 'Google', 'PlayReadyInitiator': 'false', 'Capabilities': CAPS_4K},
+    {'id': 'sony-androidtv-4k', 'DrmType': 'PLAYREADY', 'Platform': 'androidtv', 'PlayerId': '@dazn/peng-html5-core/androidtv/androidtv', 'Model': 'BRAVIA 4K GB', 'Manufacturer': 'Sony', 'PlayReadyInitiator': 'false', 'Capabilities': CAPS_4K},
 ]
+
+# First UHD attempt: webOS TV Widevine + 4k capabilities (often dck1-ac-vod 2160p before PlayReady TV IDs).
+DEFAULT_UHD_PROFILE_ID = 'webos-widevine'
+UHD_CURL_TRY_ORDER_ALL = ['webos-widevine', *[p['id'] for p in UHD_PROFILES]]
+
+
+def uhd_profile_try_order():
+    forced = (os.environ.get('KAYO_UHD_PROFILE') or '').strip()
+    if forced:
+        return [forced]
+    if os.environ.get('KAYO_UHD_PROBE_ALL') == '1':
+        return UHD_CURL_TRY_ORDER_ALL
+    return [DEFAULT_UHD_PROFILE_ID]
+
+WEB_WIDEVINE = {
+    'id': 'web-widevine',
+    'DrmType': 'WIDEVINE',
+    'Platform': 'web',
+    'PlayerId': '@dazn/peng-html5-core/web/web',
+    'Model': 'Chrome',
+    'Manufacturer': 'google',
+    'PlayReadyInitiator': 'false',
+    'Capabilities': 'hdr,hevc,mta',
+}
+
+WEBOS_WIDEVINE = {
+    'id': 'webos-widevine',
+    'DrmType': 'WIDEVINE',
+    'Platform': 'webos',
+    'PlayerId': '@dazn/peng-html5-core/tv-next/tv',
+    'Model': '43UR8050PSB',
+    'Manufacturer': 'lg',
+    'PlayReadyInitiator': 'false',
+    'Capabilities': '4k,dd,ddp,hdr,hevc,mta',
+}
+
+
+def load_token_file():
+    root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+    path = os.environ.get('KAYO_TOKEN_FILE') or os.path.join(root, 'kayo-token.json')
+    if not os.path.isfile(path):
+        return {}
+    try:
+        with open(path, encoding='utf-8') as handle:
+            return json.load(handle)
+    except (OSError, json.JSONDecodeError):
+        return {}
 
 
 def load_dotenv():
@@ -182,10 +308,10 @@ def probe_playback_row(asset_id, token, profile, headers, auth_mode='jwt', metho
         if method == 'POST':
             url = playback_post_hisense_url(asset_id)
             body = playback_post_hisense_body()
-            resp = requests.post(url, headers=headers, data=body, impersonate='chrome120', timeout=45, proxies=NO_PROXY)
+            resp = playback_http_post(url, headers, body)
         else:
             url = build_profile_url(asset_id, token, profile)
-            resp = requests.get(url, headers=headers, impersonate='chrome120', timeout=45, proxies=NO_PROXY)
+            resp = playback_http_get(url, headers)
         if resp.status_code != 200:
             return {'profile': name, 'auth': auth_mode, 'method': method, 'status': resp.status_code, 'max_h': 0}
         pb = resp.json()
@@ -220,20 +346,50 @@ def probe_playback_row(asset_id, token, profile, headers, auth_mode='jwt', metho
         return {'profile': name, 'auth': auth_mode, 'method': method, 'error': str(exc), 'max_h': 0}
 
 
+def profile_by_id(profile_id):
+    if profile_id == 'webos-widevine':
+        return WEBOS_WIDEVINE
+    if profile_id == 'web-widevine':
+        return WEB_WIDEVINE
+    return next((p for p in UHD_PROFILES if p['id'] == profile_id), None)
+
+
+def _note_best_from_row(row, best, best_any):
+    if row.get('status') == 200 and row.get('max_h', 0) >= 2160:
+        if best is None or row.get('max_h', 0) > best.get('max_h', 0):
+            best = row
+    if row.get('status') == 200 and (best_any is None or row.get('max_h', 0) > best_any.get('max_h', 0)):
+        best_any = row
+    return best, best_any
+
+
 def probe_uhd_profiles(asset_id, token, session_id):
+    load_dotenv()
+    if os.environ.get('KAYO_UHD_PROBE_ALL') != '1':
+        webos_row = probe_playback_row(
+            asset_id, token, WEBOS_WIDEVINE, playback_headers(token, session_id), auth_mode='jwt', method='GET',
+        )
+        best = webos_row if webos_row.get('status') == 200 and webos_row.get('max_h', 0) >= 2160 else None
+        best_any = webos_row if webos_row.get('status') == 200 else None
+        all_blocked = webos_row.get('status') == 403
+        return {'results': [webos_row], 'best': best, 'best_any': best_any, 'all_blocked': all_blocked}
+
     results = []
     best = None
     best_any = None
     device_uuid = str(uuid.uuid4())
 
+    webos_row = probe_playback_row(
+        asset_id, token, WEBOS_WIDEVINE, playback_headers(token, session_id), auth_mode='jwt', method='GET',
+    )
+    results.append(webos_row)
+    best, best_any = _note_best_from_row(webos_row, best, best_any)
+
     post_row = probe_playback_row(
         asset_id, token, {'id': 'hisense-vidaa-post'}, kayo_site_headers(token, session_id), auth_mode='post', method='POST',
     )
     results.append(post_row)
-    if post_row.get('status') == 200 and post_row.get('max_h', 0) >= 2160:
-        best = post_row
-    if post_row.get('status') == 200 and (best_any is None or post_row.get('max_h', 0) > best_any.get('max_h', 0)):
-        best_any = post_row
+    best, best_any = _note_best_from_row(post_row, best, best_any)
 
     for profile in UHD_PROFILES:
         attempts = [
@@ -250,10 +406,7 @@ def probe_uhd_profiles(asset_id, token, session_id):
                 profile_best = row
         if not profile_best:
             continue
-        if profile_best.get('max_h', 0) >= 2160 and (best is None or profile_best['max_h'] > best.get('max_h', 0)):
-            best = profile_best
-        if best_any is None or profile_best.get('max_h', 0) > best_any.get('max_h', 0):
-            best_any = profile_best
+        best, best_any = _note_best_from_row(profile_best, best, best_any)
 
     playready_blocked = all(
         r.get('status') == 403
@@ -261,29 +414,6 @@ def probe_uhd_profiles(asset_id, token, session_id):
         if r.get('method') in ('GET', 'POST')
     )
     return {'results': results, 'best': best, 'best_any': best_any, 'all_blocked': playready_blocked}
-
-
-WEB_WIDEVINE = {
-    'id': 'web-widevine',
-    'DrmType': 'WIDEVINE',
-    'Platform': 'web',
-    'PlayerId': '@dazn/peng-html5-core/web/web',
-    'Model': 'Chrome',
-    'Manufacturer': 'google',
-    'PlayReadyInitiator': 'false',
-    'Capabilities': 'hdr,hevc,mta',
-}
-
-WEBOS_WIDEVINE = {
-    'id': 'webos-widevine',
-    'DrmType': 'WIDEVINE',
-    'Platform': 'webos',
-    'PlayerId': '@dazn/peng-html5-core/tv-next/tv',
-    'Model': '43UR8050PSB',
-    'Manufacturer': 'lg',
-    'PlayReadyInitiator': 'false',
-    'Capabilities': '4k,dd,ddp,hdr,hevc,mta',
-}
 
 
 def web_widevine_ad_body():
@@ -311,26 +441,61 @@ def build_widevine_url(asset_id, token):
     return build_profile_url(asset_id, token, WEB_WIDEVINE)
 
 
-def fetch_playback_widevine(asset_id, token, session_id):
-    """Try web JWT profile first; fall back to legacy TV webos profile."""
+def _apply_cookie(headers, cookie_header):
+    if not cookie_header:
+        return headers
+    out = dict(headers)
+    out['Cookie'] = cookie_header
+    return out
+
+
+def fetch_playback_widevine(asset_id, token, session_id, cookie_header=None):
+    """UHD-first webOS 4K Widevine, then web Widevine (HD default)."""
     attempts = [
+        ('webos-get', 'GET', build_profile_url(asset_id, token, WEBOS_WIDEVINE), playback_headers(token, session_id), None),
         ('web-get', 'GET', build_profile_url(asset_id, token, WEB_WIDEVINE), kayo_site_headers(token, session_id), None),
         ('web-post', 'POST', build_profile_url(asset_id, token, WEB_WIDEVINE), kayo_site_headers(token, session_id), web_widevine_ad_body()),
-        ('webos-get', 'GET', build_profile_url(asset_id, token, WEBOS_WIDEVINE), playback_headers(token, session_id), None),
     ]
     last_status = 0
     last_body = ''
     for _name, method, url, headers, body in attempts:
+        headers = _apply_cookie(headers, cookie_header)
         if method == 'POST':
-            resp = requests.post(url, headers=headers, data=body, impersonate='chrome120', timeout=45, proxies=NO_PROXY)
+            resp = playback_http_post(url, headers, body)
         else:
-            get_headers = {k: v for k, v in headers.items() if k.lower() != 'content-type'}
-            resp = requests.get(url, headers=get_headers, impersonate='chrome120', timeout=45, proxies=NO_PROXY)
+            resp = playback_http_get(url, headers)
         if resp.status_code == 200:
             return resp.json()
         last_status = resp.status_code
         last_body = resp.text[:300]
     return {'error': f'Playback API HTTP {last_status}', 'body': last_body}
+
+
+def fetch_playback_vidaa_post(asset_id, token, session_id, cookie_header=None):
+    url = playback_post_hisense_url(asset_id)
+    headers = _apply_cookie(kayo_site_headers(token, session_id), cookie_header)
+    resp = playback_http_post(url, headers, playback_post_hisense_body())
+    if resp.status_code != 200:
+        return {'error': f'Playback API HTTP {resp.status_code}', 'body': resp.text[:300]}
+    return resp.json()
+
+
+def fetch_playback_profile_by_id(asset_id, token, session_id, profile_id, cookie_header=None):
+    profile = profile_by_id(profile_id)
+    if not profile:
+        return {'error': f'unknown profile {profile_id}'}
+    url = build_profile_url(asset_id, token, profile)
+    headers = playback_headers(token, session_id)
+    if profile.get('DrmType') == 'WIDEVINE' and profile.get('Platform') == 'web':
+        headers = kayo_site_headers(token, session_id)
+    headers = _apply_cookie(headers, cookie_header)
+    resp = playback_http_get(url, headers)
+    if resp.status_code != 200:
+        return {'error': f'Playback API HTTP {resp.status_code}', 'body': resp.text[:300]}
+    return resp.json()
+
+
+fetch_playback_uhd_profile = fetch_playback_profile_by_id
 
 
 def fetch_playready_jinx(asset_id, token, device_uuid):
@@ -392,17 +557,11 @@ def main():
         token = sys.argv[3]
         profile_id = sys.argv[4]
         session_id = sys.argv[5] if len(sys.argv) > 5 and sys.argv[5] else None
-        profile = next((p for p in UHD_PROFILES if p['id'] == profile_id), None)
-        if not profile:
-            print(json.dumps({'error': f'unknown profile {profile_id}'}))
+        result = fetch_playback_profile_by_id(asset_id, token, session_id, profile_id)
+        if result.get('error'):
+            print(json.dumps(result))
             sys.exit(2)
-        url = build_profile_url(asset_id, token, profile)
-        headers = playback_headers(token, session_id)
-        resp = requests.get(url, headers=headers, impersonate='chrome120', timeout=45, proxies=NO_PROXY)
-        if resp.status_code != 200:
-            print(json.dumps({'error': f'Playback API HTTP {resp.status_code}', 'body': resp.text[:300]}))
-            sys.exit(2)
-        print(json.dumps(resp.json()))
+        print(json.dumps(result))
         return
 
     if cmd == 'playback':
@@ -410,6 +569,46 @@ def main():
         token = sys.argv[3]
         session_id = sys.argv[4] if len(sys.argv) > 4 and sys.argv[4] else None
         result = fetch_playback_widevine(asset_id, token, session_id)
+        if result.get('error'):
+            print(json.dumps(result))
+            sys.exit(2)
+        print(json.dumps(result))
+        return
+
+    if cmd == 'playback-cookie':
+        asset_id = sys.argv[2]
+        token = sys.argv[3]
+        cookie_b64 = sys.argv[4]
+        session_id = sys.argv[5] if len(sys.argv) > 5 else None
+        cookie = base64.b64decode(cookie_b64).decode('utf-8', errors='replace')
+        result = fetch_playback_widevine(asset_id, token, session_id, cookie)
+        if result.get('error'):
+            print(json.dumps(result))
+            sys.exit(2)
+        print(json.dumps(result))
+        return
+
+    if cmd == 'playback-vidaa-cookie':
+        asset_id = sys.argv[2]
+        token = sys.argv[3]
+        cookie_b64 = sys.argv[4]
+        session_id = sys.argv[5] if len(sys.argv) > 5 else None
+        cookie = base64.b64decode(cookie_b64).decode('utf-8', errors='replace')
+        result = fetch_playback_vidaa_post(asset_id, token, session_id, cookie)
+        if result.get('error'):
+            print(json.dumps(result))
+            sys.exit(2)
+        print(json.dumps(result))
+        return
+
+    if cmd == 'playback-profile-cookie':
+        asset_id = sys.argv[2]
+        token = sys.argv[3]
+        profile_id = sys.argv[4]
+        cookie_b64 = sys.argv[5]
+        session_id = sys.argv[6] if len(sys.argv) > 6 else None
+        cookie = base64.b64decode(cookie_b64).decode('utf-8', errors='replace')
+        result = fetch_playback_uhd_profile(asset_id, token, session_id, profile_id, cookie)
         if result.get('error'):
             print(json.dumps(result))
             sys.exit(2)
@@ -479,10 +678,26 @@ def main():
         token = sys.argv[3]
         body_b64 = sys.argv[4]
         content_type = sys.argv[5] if len(sys.argv) > 5 else 'application/octet-stream'
-        headers = playback_headers(token)
+        session_id = None
+        tok_meta = load_token_file()
+        if tok_meta.get('sessionId'):
+            session_id = tok_meta.get('sessionId')
+        headers = playback_headers(token, session_id)
         headers['Content-Type'] = content_type
+        if len(sys.argv) > 6 and sys.argv[6]:
+            try:
+                headers.update(json.loads(sys.argv[6]))
+            except json.JSONDecodeError:
+                pass
         body = base64.b64decode(body_b64)
-        resp = requests.post(url, headers=headers, data=body, impersonate='chrome120', timeout=45, proxies=NO_PROXY)
+        resp = requests.post(
+            url,
+            headers=headers,
+            data=body,
+            impersonate='chrome120',
+            timeout=45,
+            proxies=curl_proxies(),
+        )
         if resp.status_code != 200:
             print(json.dumps({
                 'error': f'HTTP {resp.status_code}',
