@@ -18,7 +18,8 @@ const { renderTable } = require('./lib/table');
 const { resolvePlaybackProxied } = require('./lib/playback');
 const { appendStreamHeader, appendSingleStream } = require('./lib/key-store');
 const { promptLiveRange: promptLiveRangeInput } = require('./lib/live-range-prompt');
-const { launchNm3u8DlCommand } = require('./lib/launch-download');
+const { launchDownload } = require('./lib/launch-external-downloader');
+const { getDownloaderMode } = require('./lib/downloader-mode');
 const {
   printBanner,
   logInfo,
@@ -202,6 +203,41 @@ function printStream(s, index, { liveChannel = false, uhdItem = false } = {}) {
   console.log('');
 }
 
+function logDownloadLaunch(launched, { keyFile } = {}) {
+  if (!launched) return;
+  const mode = getDownloaderMode();
+  if (launched.hint) {
+    logInfo(launched.hint);
+    logOk(`Launched UniDL TUI — batch: ${launched.batchPath}`);
+    return;
+  }
+  if (launched.mode === 'unidl-cli') {
+    if (launched.command) {
+      console.log(colorEnabled() ? `${C.gray}${launched.command}${C.reset}` : launched.command);
+    }
+    logOk(`Launched unidl download — batch: ${launched.batchPath}`);
+    if (launched.bridgePort) {
+      logInfo(`CDN bridge on 127.0.0.1:${launched.bridgePort} → ${launched.bridgeOrigin} (no User-Agent to Kayo CDN).`);
+    }
+    logInfo('Keep Clash/VPN on (AU). Extra flags: KAYO_UNIDL_EXTRA in .env (same as manual unidl download).');
+  } else if (mode === 'unshackle') {
+    console.log(colorEnabled() ? `${C.gray}${launched.command}${C.reset}` : launched.command);
+    logOk(`Launched unshackle import — batch: ${launched.batchPath}`);
+    logInfo(`Export: ${launched.exportPath}`);
+    logWarn('Unshackle re-fetches the MPD with requests — keep Clash TUN on (AU). CDN may 401 if headers are wrong.');
+  } else {
+    if (launched.command) {
+      console.log(colorEnabled() ? `${C.gray}${launched.command}${C.reset}` : launched.command);
+    }
+    logOk(`Launched ${launched.cmdExe || 'download'} — batch: ${launched.batchPath}`);
+    if (launched.bridgePort) {
+      logInfo(`CDN bridge on 127.0.0.1:${launched.bridgePort} → ${launched.bridgeOrigin} (no User-Agent to Kayo CDN).`);
+    }
+    logInfo('Keep Clash/VPN on (AU). N_m3u8DL-RE fetches segments via local CDN bridge.');
+  }
+  if (keyFile) logOk(`Keys saved to ${keyFile}`);
+}
+
 async function fetchStream(assetId, title, token, { item = null } = {}) {
   logInfo(`Fetching playback for ${colorEnabled() ? kayo(title || assetId) : (title || assetId)}...`);
 
@@ -293,19 +329,16 @@ async function fetchStream(assetId, title, token, { item = null } = {}) {
       }
     }
     try {
-      const launched = await launchNm3u8DlCommand(cmd, {
-        saveDir,
+      const launched = await launchDownload({
+        cmd,
+        pick: result.downloadStream,
+        result,
         title: result.title,
-        cdnUpstreamBase: result.downloadStream.cdnUpstreamBase,
-        manifestUrl: result.downloadStream.manifestUrl,
+        item,
+        assetId,
+        saveDir,
       });
-      console.log(colorEnabled() ? `${C.gray}${launched.command}${C.reset}` : launched.command);
-      logOk(`Launched ${launched.cmdExe} — batch: ${launched.batchPath}`);
-      if (launched.bridgePort) {
-        logInfo(`CDN bridge on 127.0.0.1:${launched.bridgePort} → ${launched.bridgeOrigin} (no User-Agent to Kayo CDN).`);
-      }
-      if (keyFile) logOk(`Keys saved to ${keyFile}`);
-      logInfo('Keep Clash/VPN on (AU). N_m3u8DL-RE fetches segments via local CDN bridge.');
+      logDownloadLaunch(launched, { keyFile });
     } catch (e) {
       logErr(`Could not launch download: ${e.message}`);
     }
@@ -323,20 +356,17 @@ async function fetchStream(assetId, title, token, { item = null } = {}) {
         logInfo(`Download proxy: ${kayo(proxyLabel)} — ${mode}`);
       }
       console.log('');
-      logOk(`Launching download — ${pick.cdnName} (recommended)`);
+      logOk(`Launching download — ${pick.cdnName} (recommended) · ${getDownloaderMode()}`);
       try {
-        const launched = await launchNm3u8DlCommand(pick.cmd, {
+        const launched = await launchDownload({
+          cmd: pick.cmd,
+          pick,
+          result,
           title: result.title,
-          cdnUpstreamBase: pick.cdnUpstreamBase,
-          manifestUrl: pick.manifestUrl,
+          item,
+          assetId,
         });
-        console.log(colorEnabled() ? `${C.gray}${launched.command}${C.reset}` : launched.command);
-        logOk(`Launched ${launched.cmdExe} — batch: ${launched.batchPath}`);
-        if (launched.bridgePort) {
-          logInfo(`CDN bridge on 127.0.0.1:${launched.bridgePort} → ${launched.bridgeOrigin} (no User-Agent to Kayo CDN).`);
-        }
-        if (keyFile) logOk(`Keys saved to ${keyFile}`);
-        logInfo('Keep Clash/VPN on (AU). N_m3u8DL-RE fetches segments via local CDN bridge.');
+        logDownloadLaunch(launched, { keyFile });
       } catch (e) {
         logErr(`Could not launch download: ${e.message}`);
         logInfo('Do not paste the printed command — it contains __KAYO_BRIDGE__ until auto-launch. Fix the error above and re-run kayo_cmd.');
@@ -397,7 +427,7 @@ async function browseReplaySport(category, token) {
   logInfo(`Loading ${category.label} sections...`);
   let subcategories;
   try {
-    subcategories = await loadReplaySubcategories(category.sportTitle, token);
+    subcategories = await loadReplaySubcategories(category.sportTitle, token, (msg) => logInfo(msg));
   } catch (e) {
     logErr(e.message || String(e));
     return;
@@ -517,6 +547,7 @@ async function main() {
 
   try {
     await loadCategories((msg) => logInfo(msg));
+    logOk('Ready — choose a category number below (Cricket Replays = replay list).');
   } catch (e) {
     logWarn(`Could not load replay categories: ${e.message || e}`);
     logWarn('Showing base categories only (Live TV, EPG, 4K).');

@@ -17,6 +17,9 @@ NO_PROXY = {'http': None, 'https': None, 'all': None}
 # makes N_m3u8DL abort with "Download speed too slow".
 INIT_404_RETRIES = 4
 INIT_404_DELAY = 0.12
+# Live record: N_m3u8DL refreshes the MPD every ~14s while -mt hammers segments — transient curl errors happen.
+UPSTREAM_RETRIES = 4
+UPSTREAM_RETRY_DELAY = 0.35
 _TZ_SPACE = re.compile(r' (\d{2}:\d{2})$')
 
 
@@ -57,14 +60,21 @@ class BridgeHandler(BaseHTTPRequestHandler):
 
     def _get(self, path):
         url = self.cdn_origin.rstrip('/') + path
-        # One curl handle per request. The shared session breaks parallel -mt
-        # downloads and returns 404 for audio/subtitle init while video succeeds.
-        session = requests.Session()
-        try:
-            resp = session.get(url, impersonate='chrome120', timeout=120, proxies=NO_PROXY)
-            return _Body(resp.status_code, resp.content)
-        finally:
-            session.close()
+        last_exc = None
+        for attempt in range(UPSTREAM_RETRIES):
+            # One curl handle per request. The shared session breaks parallel -mt
+            # downloads and returns 404 for audio/subtitle init while video succeeds.
+            session = requests.Session()
+            try:
+                resp = session.get(url, impersonate='chrome120', timeout=120, proxies=NO_PROXY)
+                return _Body(resp.status_code, resp.content)
+            except Exception as exc:
+                last_exc = exc
+                if attempt + 1 < UPSTREAM_RETRIES:
+                    time.sleep(UPSTREAM_RETRY_DELAY * (attempt + 1))
+            finally:
+                session.close()
+        raise last_exc
 
     def _fetch(self, path):
         path = _normalize_path(path)
@@ -97,13 +107,19 @@ class BridgeHandler(BaseHTTPRequestHandler):
             self.end_headers()
             if body:
                 self.wfile.write(body)
+        except (BrokenPipeError, ConnectionAbortedError, ConnectionResetError):
+            # N_m3u8DL cancelled or moved on — not an upstream failure.
+            return
         except Exception as exc:
-            msg = str(exc).encode('utf-8', 'replace')
-            self.send_response(502)
-            self.send_header('Content-Type', 'text/plain')
-            self.send_header('Content-Length', str(len(msg)))
-            self.end_headers()
-            self.wfile.write(msg)
+            msg = f'bridge upstream error: {exc}'.encode('utf-8', 'replace')
+            try:
+                self.send_response(502)
+                self.send_header('Content-Type', 'text/plain')
+                self.send_header('Content-Length', str(len(msg)))
+                self.end_headers()
+                self.wfile.write(msg)
+            except (BrokenPipeError, ConnectionAbortedError, ConnectionResetError):
+                return
 
 
 def main():
