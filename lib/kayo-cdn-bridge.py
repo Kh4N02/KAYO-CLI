@@ -42,7 +42,7 @@ def _normalize_path(path):
 
 
 def _without_window(path):
-    """Init files 404 when start/end is attached; token + m= is enough."""
+    """Init/media segments 404 when start/end is attached; token + m= is enough."""
     parts = urlsplit(path)
     pairs = [
         (key, value)
@@ -50,6 +50,20 @@ def _without_window(path):
         if key not in ('start', 'end')
     ]
     return urlunsplit(('', '', parts.path, urlencode(pairs), ''))
+
+
+def _is_manifest_path(path):
+    return path.split('?', 1)[0].lower().endswith('.mpd')
+
+
+def _is_media_segment_path(path):
+    if _is_manifest_path(path):
+        return False
+    file_part = path.split('?', 1)[0].lower()
+    return any(
+        file_part.endswith(ext)
+        for ext in ('.mp4', '.m4s', '.cmfv', '.cmfa', '.m4v', '.m4a', '.ts')
+    ) or 'index_video' in file_part or 'index_audio' in file_part
 
 
 class BridgeHandler(BaseHTTPRequestHandler):
@@ -78,24 +92,29 @@ class BridgeHandler(BaseHTTPRequestHandler):
 
     def _fetch(self, path):
         path = _normalize_path(path)
+        alt = _without_window(path) if 'start=' in path or 'end=' in path else path
+
+        # Catchup/live window on manifest URL — segments usually need token only, not start/end.
+        if _is_media_segment_path(path) and alt != path:
+            resp = self._get(alt)
+            if resp.status_code != 404:
+                return resp
+
         resp = self._get(path)
         file_part = path.split('?', 1)[0]
-        if resp.status_code != 404 or '_init.' not in file_part:
+        if resp.status_code != 404:
             return resp
-        alt = _without_window(path)
+        if '_init.' not in file_part and not _is_media_segment_path(path):
+            return resp
         if alt != path:
             alt_resp = self._get(alt)
             if alt_resp.status_code != 404:
                 return alt_resp
         for _ in range(INIT_404_RETRIES):
             time.sleep(INIT_404_DELAY)
-            resp = self._get(path)
+            resp = self._get(alt if alt != path else path)
             if resp.status_code != 404:
                 return resp
-            if alt != path:
-                alt_resp = self._get(alt)
-                if alt_resp.status_code != 404:
-                    return alt_resp
         return resp
 
     def do_GET(self):
@@ -126,6 +145,11 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--origin', required=True, help='CDN origin, e.g. https://dck1-fs-live.dtcdn.dazn.com')
     parser.add_argument('--port', type=int, required=True)
+    parser.add_argument(
+        '--bind',
+        default='127.0.0.1',
+        help='Listen address (0.0.0.0 so WSL can reach the bridge via the Windows host IP)',
+    )
     args = parser.parse_args()
 
     parsed = urlparse(args.origin)
@@ -134,8 +158,11 @@ def main():
         sys.exit(2)
 
     BridgeHandler.cdn_origin = f'{parsed.scheme}://{parsed.netloc}'
-    server = ThreadingHTTPServer(('127.0.0.1', args.port), BridgeHandler)
-    print(json.dumps({'ok': True, 'port': args.port, 'origin': BridgeHandler.cdn_origin}), flush=True)
+    server = ThreadingHTTPServer((args.bind, args.port), BridgeHandler)
+    print(
+        json.dumps({'ok': True, 'port': args.port, 'bind': args.bind, 'origin': BridgeHandler.cdn_origin}),
+        flush=True,
+    )
     server.serve_forever()
 
 

@@ -211,15 +211,41 @@ function logDownloadLaunch(launched, { keyFile } = {}) {
     logOk(`Launched UniDL TUI — batch: ${launched.batchPath}`);
     return;
   }
-  if (launched.mode === 'unidl-cli') {
+  if (launched.mode === 'unidl-cli' || launched.mode === 'unidl-wsl' || launched.mode === 'unidl-wsl-save') {
     if (launched.command) {
       console.log(colorEnabled() ? `${C.gray}${launched.command}${C.reset}` : launched.command);
     }
-    logOk(`Launched unidl download — batch: ${launched.batchPath}`);
+    if (launched.savedCommands) {
+      logOk(`Saved UniDL command (HBO-style): ${launched.savedCommands.txtPath}`);
+      logInfo(`Ubuntu script: ${launched.savedCommands.wslScriptPath}`);
+      if (launched.savedCommands.bridgeBat) {
+        logInfo(`Windows bridge (keep open): ${launched.savedCommands.bridgeBat}`);
+      }
+      logInfo(`Folder: ${launched.commandsDir || launched.savedCommands.commandsDir} — use "kayo" picker in WSL (see scripts/kayo-unidl-pick.sh).`);
+    }
+    if (launched.mode === 'unidl-wsl-save') {
+      logOk('Live record ready for Ubuntu — bridge started; run the .sh in WSL when ready.');
+    } else if (launched.mode === 'unidl-wsl') {
+      logOk(`Launched UniDL live record via WSL — ${launched.batchPath}`);
+      logInfo(`WSL script: ${launched.wslScript}`);
+      logInfo('Pipe-mux needs Linux FIFOs — UniDL runs in Ubuntu; bridge stays on Windows.');
+    } else {
+      logOk(`Launched unidl download — batch: ${launched.batchPath}`);
+    }
     if (launched.bridgePort) {
       logInfo(`CDN bridge on 127.0.0.1:${launched.bridgePort} → ${launched.bridgeOrigin} (no User-Agent to Kayo CDN).`);
     }
-    logInfo('Keep Clash/VPN on (AU). Extra flags: KAYO_UNIDL_EXTRA in .env (same as manual unidl download).');
+    if (launched.recordingSaveDir) {
+      const name = launched.recordingSaveName || 'output';
+      logOk(`Recording file → ${launched.recordingSaveDir}\\${name}.mkv (grows while live)`);
+      logInfo('Ubuntu-only: set KAYO_UNIDL_WSL_LAUNCH=save and run `kayo` in WSL (skip the extra Windows cmd window).');
+    }
+    logInfo('In the UniDL window: pick tracks manually (e.g. 1,7 for 1080p+AC-3). Live record muxes A/V while recording.');
+    logInfo('Low-latency live: KAYO_UNIDL_LIVE_TAKE_COUNT=1 and KAYO_UNIDL_LIVE_WAIT_TIME=2 (poll MPD every ~2s, one segment at a time).');
+    if (launched.livePipeMuxSkipped) {
+      logWarn('Live pipe-mux skipped (install WSL + unidl in Ubuntu, or set KAYO_UNIDL_WSL=auto).');
+    }
+    logInfo('Keep Clash/VPN on (AU). Tunables: KAYO_UNIDL_EXTRA, KAYO_UNIDL_TMP_DIR, KAYO_UNIDL_LOG_DIR in .env.');
   } else if (mode === 'unshackle') {
     console.log(colorEnabled() ? `${C.gray}${launched.command}${C.reset}` : launched.command);
     logOk(`Launched unshackle import — batch: ${launched.batchPath}`);
@@ -413,8 +439,21 @@ async function browseSubcategoryItems(items, token, sectionLabel, sportLabel) {
       await fetchStream(picked.assetId, picked.title, token, { item: picked });
     } catch (e) {
       logErr(e.message || String(e));
+      if (Array.isArray(e.playbackLogs) && e.playbackLogs.length) {
+        console.log('');
+        logInfo('Playback detail (PSSH / license):');
+        for (const line of e.playbackLogs) {
+          if (/PSSH|Widevine|PlayReady|CDN probe|failed|key/i.test(line)) {
+            console.log(`  ${line}`);
+          }
+        }
+      }
       if (/401|expired|token/i.test(String(e.message))) {
         logWarn('Try restarting — token may have expired.');
+      }
+      if (/No keys extracted/i.test(String(e.message))) {
+        logInfo('Live HD: add KAYO_DRM_FIRST=playready to .env (SL2000 .prd), keep Clash AU on, then retry.');
+        logInfo('If fs-live fails, this build now tries dck1-ac-live next; or pick Live TV → same channel.');
       }
     }
     const again = await ask('Press Enter for list, or b=back, q=quit: ');
@@ -510,8 +549,21 @@ async function browseCategory(category, token) {
       await fetchStream(picked.assetId, picked.title, token, { item: picked });
     } catch (e) {
       logErr(e.message || String(e));
+      if (Array.isArray(e.playbackLogs) && e.playbackLogs.length) {
+        console.log('');
+        logInfo('Playback detail (PSSH / license):');
+        for (const line of e.playbackLogs) {
+          if (/PSSH|Widevine|PlayReady|CDN probe|failed|key/i.test(line)) {
+            console.log(`  ${line}`);
+          }
+        }
+      }
       if (/401|expired|token/i.test(String(e.message))) {
         logWarn('Try restarting — token may have expired.');
+      }
+      if (/No keys extracted/i.test(String(e.message))) {
+        logInfo('Live HD: add KAYO_DRM_FIRST=playready to .env (SL2000 .prd), keep Clash AU on, then retry.');
+        logInfo('If fs-live fails, this build now tries dck1-ac-live next; or pick Live TV → same channel.');
       }
     }
     const again = await ask('Press Enter for list, or b=back, q=quit: ');
