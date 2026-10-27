@@ -3,6 +3,7 @@
 
 import argparse
 import json
+import os
 import re
 import sys
 import time
@@ -12,6 +13,41 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlparse, urlunsplit
 from curl_cffi import requests
 
 NO_PROXY = {'http': None, 'https': None, 'all': None}
+
+
+def _bridge_proxies():
+    """CDN fetches need AU egress. Default: Clash tunnel when KAYO_PROXY_TUNNEL is set."""
+    mode = os.environ.get('KAYO_BRIDGE_PROXY', '').strip().lower()
+    if mode in ('0', 'direct', 'false', 'off', 'none'):
+        return NO_PROXY, 'direct'
+
+    if os.environ.get('KAYO_BRIDGE_DIRECT', '').strip().lower() in ('1', 'true', 'yes', 'on'):
+        return NO_PROXY, 'direct'
+
+    tunnel = os.environ.get('KAYO_PROXY_TUNNEL', '').strip()
+    if mode in ('tunnel', 'clash', 'local') or (tunnel and mode not in ('webshare', 'proxy')):
+        if tunnel:
+            url = tunnel if tunnel.startswith('http') else f'http://{tunnel}'
+            prox = {'http': url, 'https': url, 'all': url}
+            return prox, 'tunnel'
+
+    raw = os.environ.get('KAYO_PROXY', '').strip()
+    if mode in ('webshare', 'proxy', 'au') and raw:
+        parts = raw.split(':')
+        if len(parts) >= 2:
+            host, port = parts[0], parts[1]
+            if len(parts) >= 4:
+                user, pwd = parts[2], parts[3]
+                url = f'http://{user}:{pwd}@{host}:{port}'
+            else:
+                url = f'http://{host}:{port}'
+            prox = {'http': url, 'https': url, 'all': url}
+            return prox, 'webshare'
+
+    return NO_PROXY, 'direct'
+
+
+BRIDGE_PROXIES, BRIDGE_PROXY_MODE = _bridge_proxies()
 # Audio/subtitle init files 404 while video init is already up. N_m3u8DL then
 # drops that track and only video is downloaded. Keep this short — a long hold
 # makes N_m3u8DL abort with "Download speed too slow".
@@ -80,7 +116,7 @@ class BridgeHandler(BaseHTTPRequestHandler):
             # downloads and returns 404 for audio/subtitle init while video succeeds.
             session = requests.Session()
             try:
-                resp = session.get(url, impersonate='chrome120', timeout=120, proxies=NO_PROXY)
+                resp = session.get(url, impersonate='chrome120', timeout=120, proxies=BRIDGE_PROXIES)
                 return _Body(resp.status_code, resp.content)
             except Exception as exc:
                 last_exc = exc
@@ -119,6 +155,20 @@ class BridgeHandler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         try:
+            meta_path = self.path.split('?', 1)[0]
+            if meta_path == '/__kayo_bridge/meta':
+                payload = json.dumps({
+                    'ok': True,
+                    'origin': BridgeHandler.cdn_origin,
+                    'proxy': BRIDGE_PROXY_MODE,
+                }).encode('utf-8')
+                self.send_response(200)
+                self.send_header('Content-Type', 'application/json')
+                self.send_header('Content-Length', str(len(payload)))
+                self.end_headers()
+                self.wfile.write(payload)
+                return
+
             resp = self._fetch(self.path)
             body = resp.content
             self.send_response(resp.status_code)
@@ -160,7 +210,13 @@ def main():
     BridgeHandler.cdn_origin = f'{parsed.scheme}://{parsed.netloc}'
     server = ThreadingHTTPServer((args.bind, args.port), BridgeHandler)
     print(
-        json.dumps({'ok': True, 'port': args.port, 'bind': args.bind, 'origin': BridgeHandler.cdn_origin}),
+        json.dumps({
+            'ok': True,
+            'port': args.port,
+            'bind': args.bind,
+            'origin': BridgeHandler.cdn_origin,
+            'proxy': BRIDGE_PROXY_MODE,
+        }),
         flush=True,
     )
     server.serve_forever()

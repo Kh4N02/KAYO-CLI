@@ -13,10 +13,10 @@ const { localCdmAvailable } = require('../lib/cdm-device');
 const cdmLocal = require('../lib/cdm-local');
 const { WIDEVINE_UUID, PLAYREADY_UUID } = require('../lib/cdm-device');
 const CDN_NAMES = [
-  'dck1-fs-live',
-  'dck1-fs-vod',
   'dck1-ac-live',
   'dck1-ac-vod',
+  'dck1-fs-live',
+  'dck1-fs-vod',
   'dck1-ak-live',
   'dck1-ak-vod',
 ];

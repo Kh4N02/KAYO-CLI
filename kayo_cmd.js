@@ -166,16 +166,18 @@ function printStream(s, index, { liveChannel = false, uhdItem = false } = {}) {
         logOk('CDN token refreshed — run N_m3u8DL command immediately.');
       }
     } else if (s.isUhd) {
-      if (s.maxHeight && s.maxHeight < 2160) {
-        logInfo(`UHD item — manifest tops out at ${s.maxQuality} (PlayReady keys via Widevine playback). True 2160p needs PlayReady playback API when available.`);
+      if (s.uhdPlaybackProfile) {
+        logInfo(`Playback profile: ${s.uhdPlaybackProfile}${s.is4k ? ' · 2160p MPD' : ''}`);
+      }
+      if (s.is4k || (s.maxHeight && s.maxHeight >= 2160)) {
+        logOk('4K ladder — PlayReady + ac-vod (pick 2160p HEVC + best audio in UniDL, e.g. KAYO_UNIDL_UHD_SELECT).');
+      } else if (s.maxHeight && s.maxHeight < 2160) {
+        logInfo(`UHD item — manifest tops out at ${s.maxQuality}. For 2160p set KAYO_UHD_PROFILE=web-playready-4k-cap (Premium allow4k).`);
       } else if (s.uhdAvailable) {
-        logInfo('2160p or multi-key UHD ladder detected.');
+        logInfo('Multi-key UHD ladder — verify max height in MPD.');
       }
       if (s.tokenRefreshed) {
         logOk('CDN token refreshed — run N_m3u8DL command immediately.');
-      }
-      if (/ac-vod/i.test(s.cdnName)) {
-        logInfo('Using dck1-ac-vod (fs-vod segment auth failed probe).');
       }
     } else if (s.maxHeight && s.maxHeight < 2160) {
       logInfo(`UHD item — manifest tops out at ${s.maxQuality} (PlayReady keys via Widevine playback). True 2160p needs PlayReady playback API when available.`);
@@ -341,15 +343,9 @@ async function fetchStream(assetId, title, token, { item = null } = {}) {
     console.log('');
     if (isLiveChannel) {
       logOk(`CDN: ${cdnName} · 1080p HEVC · stereo AAC · no subs`);
-      if (/ac-live/i.test(cdnName)) {
-        logInfo('Using dck1-ac-live (fs-live segment auth failed probe).');
-      }
     } else {
       const q = maxHeight >= 2160 ? '2160p' : (maxQuality || '1080p');
       logOk(`CDN: ${cdnName} · ${q} · PlayReady keys · stereo AAC · no subs`);
-      if (/ac-vod/i.test(cdnName)) {
-        logInfo('Using dck1-ac-vod (fs-vod segment auth failed probe).');
-      }
       if (maxHeight && maxHeight < 2160) {
         logInfo(`Manifest max ${maxQuality} — best available until PlayReady playback API returns 2160p.`);
       }
@@ -453,7 +449,7 @@ async function browseSubcategoryItems(items, token, sectionLabel, sportLabel) {
       }
       if (/No keys extracted/i.test(String(e.message))) {
         logInfo('Live HD: add KAYO_DRM_FIRST=playready to .env (SL2000 .prd), keep Clash AU on, then retry.');
-        logInfo('If fs-live fails, this build now tries dck1-ac-live next; or pick Live TV → same channel.');
+        logInfo('Live downloads use dck1-ac-live only — retry or pick Live TV → same channel.');
       }
     }
     const again = await ask('Press Enter for list, or b=back, q=quit: ');
@@ -563,7 +559,7 @@ async function browseCategory(category, token) {
       }
       if (/No keys extracted/i.test(String(e.message))) {
         logInfo('Live HD: add KAYO_DRM_FIRST=playready to .env (SL2000 .prd), keep Clash AU on, then retry.');
-        logInfo('If fs-live fails, this build now tries dck1-ac-live next; or pick Live TV → same channel.');
+        logInfo('Live downloads use dck1-ac-live only — retry or pick Live TV → same channel.');
       }
     }
     const again = await ask('Press Enter for list, or b=back, q=quit: ');

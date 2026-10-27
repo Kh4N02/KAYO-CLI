@@ -117,13 +117,22 @@ DEFAULT_UHD_PROFILE_ID = 'webos-widevine'
 UHD_CURL_TRY_ORDER_ALL = ['webos-widevine', *[p['id'] for p in UHD_PROFILES]]
 
 
+UHD_DEFAULT_TRY_ORDER = [
+    'web-playready-4k-cap',
+    'webos-lg-4k',
+    'webos-widevine',
+]
+
+
 def uhd_profile_try_order():
     forced = (os.environ.get('KAYO_UHD_PROFILE') or '').strip()
     if forced:
         return [forced]
     if os.environ.get('KAYO_UHD_PROBE_ALL') == '1':
         return UHD_CURL_TRY_ORDER_ALL
-    return [DEFAULT_UHD_PROFILE_ID]
+    if os.environ.get('KAYO_UHD_PLAYREADY_FIRST', '1').strip() == '0':
+        return [DEFAULT_UHD_PROFILE_ID, 'web-playready-4k-cap']
+    return UHD_DEFAULT_TRY_ORDER
 
 WEB_WIDEVINE = {
     'id': 'web-widevine',
@@ -223,8 +232,9 @@ def build_profile_url(asset_id, token, profile):
     return f'{PLAYBACK_BASE}?{urlencode(params)}'
 
 
-def mpd_max_height(mpd_url, headers):
-    resp = requests.get(mpd_url, headers={**headers, 'Accept': '*/*'}, impersonate='chrome120', timeout=45, proxies=NO_PROXY)
+def mpd_max_height(mpd_url, headers=None):
+    # Kayo CDN MPD: no Referer/Origin/UA (dazn-token in URL is enough) — same as probe_live_cdn.
+    resp = requests.get(mpd_url, impersonate='chrome120', timeout=45, proxies=NO_PROXY)
     if resp.status_code != 200:
         return 0, resp.status_code
     heights = [int(x) for x in re.findall(r'height="(\d+)"', resp.text)]
@@ -232,7 +242,8 @@ def mpd_max_height(mpd_url, headers):
 
 
 def pick_cdn_entry(details):
-    for name in ('dck1-ac-vod', 'dck1-fs-vod', 'dck1-ac-live', 'dck1-fs-live'):
+    # AC only — faster / higher bitrate than fs.
+    for name in ('dck1-ac-vod', 'dck1-ac-live'):
         entry = next((d for d in details if d.get('CdnName') == name), None)
         if entry and entry.get('ManifestUrl'):
             return entry
@@ -305,9 +316,32 @@ def probe_playback_row(asset_id, token, profile, headers, auth_mode='jwt', metho
     name = profile['id'] if isinstance(profile, dict) else profile
     label = f'{name}+{auth_mode}' if method == 'GET' else f'{name}+post'
     try:
-        if method == 'POST':
+        if method == 'POST' and auth_mode == 'hisense-post':
             url = playback_post_hisense_url(asset_id)
             body = playback_post_hisense_body()
+            resp = playback_http_post(url, headers, body)
+        elif isinstance(profile, dict) and profile.get('DrmType') == 'PLAYREADY' and method == 'GET':
+            resp = None
+            used = 'GET'
+            for req_method, url, hdrs, body in _playback_attempts_for_profile(
+                asset_id, token, profile, headers.get('x-session-id'),
+            ):
+                if req_method == 'POST':
+                    resp = playback_http_post(url, hdrs, body)
+                else:
+                    resp = playback_http_get(url, hdrs)
+                used = req_method
+                if resp.status_code == 200:
+                    method = used
+                    break
+            if resp is None:
+                return {'profile': name, 'auth': auth_mode, 'method': used, 'status': 0, 'max_h': 0}
+            if resp.status_code != 200:
+                return {'profile': name, 'auth': auth_mode, 'method': used, 'status': resp.status_code, 'max_h': 0}
+            method = used
+        elif method == 'POST':
+            url = build_profile_url(asset_id, token, profile)
+            body = playback_ad_body_for_profile(profile, use_mt=False)
             resp = playback_http_post(url, headers, body)
         else:
             url = build_profile_url(asset_id, token, profile)
@@ -323,13 +357,7 @@ def probe_playback_row(asset_id, token, profile, headers, auth_mode='jwt', metho
             tok = entry['CdnToken']
             sep = '&' if '?' in mpd else '?'
             mpd += f'{sep}{tok["Name"]}={tok["Value"]}'
-        seg_headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            'Referer': 'https://kayosports.com.au/',
-            'Origin': 'https://tv.kayosports.com.au',
-            'Accept': '*/*',
-        }
-        max_h, mpd_status = mpd_max_height(mpd, seg_headers)
+        max_h, mpd_status = mpd_max_height(mpd)
         row = {
             'profile': name,
             'auth': auth_mode,
@@ -366,13 +394,43 @@ def _note_best_from_row(row, best, best_any):
 def probe_uhd_profiles(asset_id, token, session_id):
     load_dotenv()
     if os.environ.get('KAYO_UHD_PROBE_ALL') != '1':
-        webos_row = probe_playback_row(
-            asset_id, token, WEBOS_WIDEVINE, playback_headers(token, session_id), auth_mode='jwt', method='GET',
-        )
-        best = webos_row if webos_row.get('status') == 200 and webos_row.get('max_h', 0) >= 2160 else None
-        best_any = webos_row if webos_row.get('status') == 200 else None
-        all_blocked = webos_row.get('status') == 403
-        return {'results': [webos_row], 'best': best, 'best_any': best_any, 'all_blocked': all_blocked}
+        results = []
+        best = None
+        best_any = None
+        all_blocked = True
+        device_uuid = str(uuid.uuid4())
+        for profile_id in uhd_profile_try_order():
+            profile = profile_by_id(profile_id)
+            if not profile:
+                continue
+            row = probe_playback_row(
+                asset_id, token, profile, playback_headers(token, session_id), auth_mode='jwt', method='GET',
+            )
+            row['profile'] = profile_id
+            if row.get('status') == 403 and profile.get('DrmType') == 'PLAYREADY':
+                jinx_row = probe_playback_row(
+                    asset_id, token, profile, jinx_playback_headers(token, device_uuid),
+                    auth_mode='tv-uuid', method='GET',
+                )
+                jinx_row['profile'] = profile_id
+                if jinx_row.get('status') == 200:
+                    row = jinx_row
+            results.append(row)
+            if row.get('status') == 200:
+                all_blocked = False
+            best, best_any = _note_best_from_row(row, best, best_any)
+            if best and best.get('max_h', 0) >= 2160:
+                break
+        if not results:
+            webos_row = probe_playback_row(
+                asset_id, token, WEBOS_WIDEVINE, playback_headers(token, session_id), auth_mode='jwt', method='GET',
+            )
+            webos_row['profile'] = 'webos-widevine'
+            results = [webos_row]
+            best = webos_row if webos_row.get('status') == 200 and webos_row.get('max_h', 0) >= 2160 else None
+            best_any = webos_row if webos_row.get('status') == 200 else None
+            all_blocked = webos_row.get('status') == 403
+        return {'results': results, 'best': best, 'best_any': best_any, 'all_blocked': all_blocked}
 
     results = []
     best = None
@@ -436,6 +494,58 @@ def web_widevine_ad_body():
     })
 
 
+def playback_ad_body_for_profile(profile, use_mt=False):
+    """Match lib/playback-device.js — PlayReady profiles use POST + adParams (not GET)."""
+    pid = profile.get('id') if isinstance(profile, dict) else ''
+    player_web = '@dazn/peng-html5-core/web/web'
+    if pid == 'web-playready-4k-cap':
+        device_os, device_type, brand = 'web', 'Web', ''
+    elif profile.get('Platform') == 'webos':
+        device_os, device_type, brand = 'webos', 'Tv', 'LG'
+        player_web = '@dazn/peng-html5-core/tv-next/tv'
+    elif profile.get('Platform') == 'vidaa':
+        device_os, device_type, brand = 'vidaa', 'Tv', 'HISENSE'
+        player_web = '@dazn/peng-html5-core/vidaa/vidaa'
+    else:
+        device_os, device_type, brand = 'web', 'Web', ''
+        player_web = profile.get('PlayerId') or player_web
+    return json.dumps({
+        'adParams': {
+            'useMT': use_mt,
+            'isLat': '0',
+            'deviceOs': device_os,
+            'optout': '0',
+            'deviceBrand': brand,
+            'idType': '',
+            'startPos': -1,
+            'deviceType': device_type,
+            'playerName': player_web,
+            'playerVersion': APP_VERSION,
+            'vpmute': '0',
+            'wta': '0',
+            'requestPausedAdsUrl': bool(use_mt),
+        },
+    })
+
+
+def _playback_attempts_for_profile(asset_id, token, profile, session_id, cookie_header=None):
+    """Browser parity: PlayReady = POST; web Widevine = GET then POST."""
+    url = build_profile_url(asset_id, token, profile)
+    jwt_headers = _apply_cookie(playback_headers(token, session_id), cookie_header)
+    site_headers = _apply_cookie(kayo_site_headers(token, session_id), cookie_header)
+    attempts = []
+    drm = profile.get('DrmType')
+    if drm == 'PLAYREADY':
+        attempts.append(('POST', url, site_headers, playback_ad_body_for_profile(profile, use_mt=False)))
+        attempts.append(('GET', url, jwt_headers, None))
+    elif profile.get('Platform') == 'web' and drm == 'WIDEVINE':
+        attempts.append(('GET', url, site_headers, None))
+        attempts.append(('POST', url, site_headers, web_widevine_ad_body()))
+    else:
+        attempts.append(('GET', url, jwt_headers, None))
+    return attempts
+
+
 def build_widevine_url(asset_id, token):
     """Default HD profile — web Widevine (matches browser JWT)."""
     return build_profile_url(asset_id, token, WEB_WIDEVINE)
@@ -484,15 +594,20 @@ def fetch_playback_profile_by_id(asset_id, token, session_id, profile_id, cookie
     profile = profile_by_id(profile_id)
     if not profile:
         return {'error': f'unknown profile {profile_id}'}
-    url = build_profile_url(asset_id, token, profile)
-    headers = playback_headers(token, session_id)
-    if profile.get('DrmType') == 'WIDEVINE' and profile.get('Platform') == 'web':
-        headers = kayo_site_headers(token, session_id)
-    headers = _apply_cookie(headers, cookie_header)
-    resp = playback_http_get(url, headers)
-    if resp.status_code != 200:
-        return {'error': f'Playback API HTTP {resp.status_code}', 'body': resp.text[:300]}
-    return resp.json()
+    last_status = 0
+    last_body = ''
+    for req_method, url, headers, body in _playback_attempts_for_profile(
+        asset_id, token, profile, session_id, cookie_header,
+    ):
+        if req_method == 'POST':
+            resp = playback_http_post(url, headers, body)
+        else:
+            resp = playback_http_get(url, headers)
+        if resp.status_code == 200:
+            return resp.json()
+        last_status = resp.status_code
+        last_body = resp.text[:300]
+    return {'error': f'Playback API HTTP {last_status}', 'body': last_body}
 
 
 fetch_playback_uhd_profile = fetch_playback_profile_by_id
